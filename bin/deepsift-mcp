@@ -1,0 +1,4 @@
+#!/bin/sh
+# Started by Claude Code / Codex / Claude Desktop as a tool server over stdio.
+DIR="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+cd "$DIR" && exec "$DIR/.venv/bin/python" -W ignore -m deepsift.mcp_server

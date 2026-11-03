@@ -1,0 +1,4 @@
+#!/bin/sh
+# Local web search / read / crawl / research. See deepsift/cli.py.
+DIR="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+exec "$DIR/.venv/bin/python" -W ignore -m deepsift.cli "$@"
