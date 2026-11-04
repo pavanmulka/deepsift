@@ -1,5 +1,6 @@
 {
   "name": "deepsift-search",
+  "displayName": "DeepSift Search",
   "version": "0.1.0",
   "description": "Live Google web search for Claude Code that returns only the passages that answer your question. Hosted on Apify, pay per use from $4 per 1,000 searches.",
   "author": {
@@ -10,6 +11,8 @@
   "repository": "https://github.com/pavanmulka/deepsift",
   "license": "MIT",
   "privacyPolicyUrl": "https://github.com/pavanmulka/deepsift/blob/main/PRIVACY.md",
+  "supportUrl": "https://github.com/pavanmulka/deepsift/issues",
+  "documentationUrl": "https://apify.com/aadstra/deepsift-search",
   "icon": ".claude-plugin/icon.png",
   "keywords": [
     "web search",
