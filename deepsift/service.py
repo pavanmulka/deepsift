@@ -223,6 +223,8 @@ class Service:
         return results
 
     def _answer(self, query: str, results: List[Dict[str, Any]], mode: str) -> Optional[str]:
+        if not self.settings.llm_enabled:
+            return None
         sources = "\n\n".join(
             "[%d] %s (%s)\n%s" % (i + 1, r["title"], r["url"], (r.get("raw_content") or r["content"])[:3000])
             for i, r in enumerate(results)
@@ -394,6 +396,8 @@ class Service:
     # ------------------------------------------------------------ research
 
     def start_research(self, body: Dict[str, Any]) -> Dict[str, Any]:
+        if not self.settings.llm_enabled:
+            raise BadRequest("research is not available on this server")
         task = str(body.get("input") or "").strip()
         if not task:
             raise BadRequest("input is required")

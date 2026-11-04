@@ -1,0 +1,16 @@
+{
+  "actorSpecification": 1,
+  "name": "deepsift-search",
+  "title": "DeepSift Search: Tavily-compatible web search for AI agents",
+  "description": "Search Google and get back only the passages that answer your question, in the same format as the Tavily API. Works as a drop-in Tavily replacement, an MCP server for Claude and Cursor, or a batch search tool.",
+  "version": "0.1",
+  "buildTag": "latest",
+  "meta": { "templateId": "python-empty" },
+  "dockerfile": "./Dockerfile",
+  "dockerContextDir": "../",
+  "input": "./input_schema.json",
+  "storages": { "dataset": "./dataset_schema.json" },
+  "usesStandbyMode": true,
+  "webServerMcpPath": "/mcp",
+  "readme": "./README.md"
+}

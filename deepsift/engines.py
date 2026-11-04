@@ -3,12 +3,15 @@
 - claude:  Claude's own WebSearch tool via `claude -p` (billed to the subscription)
 - searxng: a self-hosted SearXNG instance (free, fastest)
 - ddg:     DuckDuckGo's HTML page (free, no key; a fallback)
+- google:  Google through Apify's GOOGLE_SERP proxy (used by the hosted Apify Actor)
 """
 from __future__ import annotations
 
+import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, unquote, urlsplit
 
 import httpx
@@ -245,10 +248,224 @@ def parse_ddg_html(markup: str) -> List[Hit]:
     return unique
 
 
+class ApifySerpEngine:
+    """Google results through Apify's GOOGLE_SERP proxy (billed per results page to the Apify account).
+
+    The proxy only accepts plain-HTTP requests to www.google.* and returns the results page HTML.
+    """
+    name = "google"
+    _TBS = {"day": "qdr:d", "week": "qdr:w", "month": "qdr:m", "year": "qdr:y"}
+    # Service asks for max_results + 3 head-room; a second Google page is only worth paying for
+    # when the caller wants more than one page (10) of results.
+    ONE_PAGE = 13
+
+    def __init__(self, settings: Settings) -> None:
+        if not settings.serp_proxy_url:
+            raise EngineError("google: no Apify GOOGLE_SERP proxy configured")
+        self._proxy = settings.serp_proxy_url
+        self._ua = settings.user_agent
+        self.pages_fetched = 0
+        self.last_html = ""  # the last results page, kept so empty searches can be diagnosed
+
+    def _params(self, q: Query, start: int) -> Dict[str, str]:
+        text = q.text
+        if q.include_domains and len(q.include_domains) <= 5:
+            text += " (" + " OR ".join("site:" + d for d in q.include_domains) + ")"
+        if q.exclude_domains:
+            text += " " + " ".join("-site:" + d for d in q.exclude_domains[:5])
+        params: Dict[str, str] = {"q": text}
+        tbs = []
+        tr = normalize_time_range(q.time_range)
+        if tr in self._TBS:
+            tbs.append(self._TBS[tr])
+        if q.start_date or q.end_date:
+            lo = _us_date(q.start_date)
+            hi = _us_date(q.end_date)
+            tbs.append("cdr:1,cd_min:%s,cd_max:%s" % (lo, hi))
+        if tbs:
+            params["tbs"] = ",".join(tbs)
+        if q.topic == "news":
+            params["tbm"] = "nws"
+        # The proxy picks an exit country at random, so always say which Google to ask.
+        code = ""
+        if q.country:
+            code = _COUNTRY_CODES.get(q.country.lower(), q.country if len(q.country) == 2 else "")
+        params["gl"] = (code or "us").lower()
+        params["hl"] = q.language or "en"
+        params["safe"] = "active" if q.safe_search else "off"
+        if start:
+            params["start"] = str(start)
+        return params
+
+    def search(self, q: Query) -> List[Hit]:
+        hits: List[Hit] = []
+        pages = 1 if q.max_results <= self.ONE_PAGE else 2
+        for page in range(pages):
+            try:
+                response = httpx.get(
+                    "http://www.google.com/search",
+                    params=self._params(q, page * 10),
+                    headers={"User-Agent": self._ua, "Accept-Language": (q.language or "en") + ";q=0.9"},
+                    proxy=self._proxy,
+                    timeout=20,
+                    follow_redirects=True,
+                )
+                self.pages_fetched += 1
+                response.raise_for_status()
+            except httpx.HTTPError as exc:
+                if hits:
+                    break
+                raise EngineError("google: %s" % exc) from exc
+            self.last_html = response.text
+            found = resolve_goto_links(parse_google_html(response.text), self._ua)
+            known = {h.url for h in hits}
+            hits.extend(h for h in found if h.url not in known)
+            if len(found) < 5:
+                break
+        return hits
+
+
+_COUNTRY_CODES = {
+    "united states": "us", "united kingdom": "gb", "india": "in", "canada": "ca", "australia": "au",
+    "germany": "de", "france": "fr", "netherlands": "nl", "spain": "es", "italy": "it", "japan": "jp",
+    "brazil": "br", "mexico": "mx", "singapore": "sg", "ireland": "ie", "sweden": "se", "switzerland": "ch",
+}
+
+
+def _us_date(value: Optional[str]) -> str:
+    """YYYY-MM-DD -> M/D/YYYY, the form Google's custom date range expects ('' = open end)."""
+    if not value:
+        return ""
+    try:
+        year, month, day = (int(part) for part in value[:10].split("-"))
+    except ValueError:
+        return ""
+    return "%d/%d/%d" % (month, day, year)
+
+
+_GOOGLE_HOST = re.compile(r"(^|\.)(google\.[a-z.]+|googleusercontent\.com|gstatic\.com)$")
+_SNIPPET_XPATH = (
+    ".//div[contains(@class,'VwiC3b')] | .//*[@data-sncf] | .//div[contains(@style,'-webkit-line-clamp')]"
+    " | .//div[contains(@class,'BNeawe') and contains(@class,'s3v9rd')]"
+)
+_REL_DATE = re.compile(r"^\s*(\d+)\s+(minute|hour|day|week|month|year)s?\s+ago\s*[—–·-]\s*", re.I)
+_ABS_DATE = re.compile(r"^\s*([A-Z][a-z]{2,8})\.?\s+(\d{1,2}),\s+(\d{4})\s*[—–·-]\s*")
+_MONTHS = {m: i + 1 for i, m in enumerate(
+    ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"])}
+
+
+_GOTO = "https://www.google.com/goto?"
+
+
+def _google_target(href: str) -> str:
+    """Unwrap /url?q=... redirect links and drop Google's own pages.
+
+    Some results pages hide the address behind an encrypted /goto?url=... link instead; those
+    come back as an absolute https://www.google.com/goto?... link for resolve_goto_links().
+    """
+    if href.startswith("/goto?"):
+        return _GOTO + href[len("/goto?"):]
+    if href.startswith("/url?") or "google." in href and "/url?" in href:
+        params = parse_qs(urlsplit(href).query)
+        href = (params.get("q") or params.get("url") or [""])[0]
+    if not href.startswith(("http://", "https://")):
+        return ""
+    host = (urlsplit(href).hostname or "").lower()
+    if _GOOGLE_HOST.search(host) or host.startswith("webcache.") or host.startswith("translate."):
+        return ""
+    return href
+
+
+def _snippet_date(snippet: str, now: Optional[float] = None) -> Tuple[str, Optional[str]]:
+    """Split a leading 'Mar 5, 2026 — ' or '3 days ago — ' off a snippet; return (snippet, YYYY-MM-DD)."""
+    match = _ABS_DATE.match(snippet)
+    if match:
+        month = _MONTHS.get(match.group(1)[:3].lower())
+        if month:
+            date = "%04d-%02d-%02d" % (int(match.group(3)), month, int(match.group(2)))
+            return snippet[match.end():].strip(), date
+    match = _REL_DATE.match(snippet)
+    if match:
+        seconds = {"minute": 60, "hour": 3600, "day": 86400, "week": 604800,
+                   "month": 2629800, "year": 31557600}[match.group(2).lower()]
+        stamp = (now or time.time()) - int(match.group(1)) * seconds
+        return snippet[match.end():].strip(), time.strftime("%Y-%m-%d", time.gmtime(stamp))
+    return snippet.strip(), None
+
+
+def parse_google_html(markup: str) -> List[Hit]:
+    """Organic results from a Google results page: every link that wraps an <h3> title."""
+    tree = lxml_html.fromstring(markup)
+    hits: List[Hit] = []
+    seen = set()
+    for link in tree.xpath("//a[.//h3]"):
+        if link.xpath("ancestor::*[@id='tads' or @id='bottomads' or @data-text-ad]"):
+            continue
+        url = _google_target(link.get("href") or "")
+        if not url or url in seen:
+            continue
+        title = " ".join(link.xpath(".//h3")[0].text_content().split())
+        if not title:
+            continue
+        # Climb to the result block: the nearest ancestor that also holds the snippet.
+        snippet = ""
+        node = link.getparent()
+        for _ in range(8):
+            if node is None:
+                break
+            if len(node.xpath(".//h3")) > 1:
+                break
+            found = node.xpath(_SNIPPET_XPATH)
+            if found:
+                snippet = " ".join(found[0].text_content().split())
+                break
+            node = node.getparent()
+        snippet, date = _snippet_date(snippet)
+        seen.add(url)
+        hits.append(Hit(title=title, url=url, snippet=snippet, published_date=date))
+    return hits
+
+
+def resolve_goto_links(hits: List[Hit], user_agent: str, timeout: float = 6.0) -> List[Hit]:
+    """Swap encrypted Google /goto links for the real address (one free redirect lookup each).
+
+    The SERP proxy refuses /goto, so this goes to google.com directly. Hits whose link can't be
+    resolved are dropped rather than returned with a Google address.
+    """
+    pending = [h for h in hits if h.url.startswith(_GOTO)]
+    if not pending:
+        return hits
+
+    def resolve(hit: Hit) -> Optional[str]:
+        try:
+            response = httpx.get(hit.url, headers={"User-Agent": user_agent}, timeout=timeout,
+                                 follow_redirects=False)
+        except httpx.HTTPError:
+            return None
+        target = _google_target(response.headers.get("location") or "")
+        return target if target and not target.startswith(_GOTO) else None
+
+    with ThreadPoolExecutor(max_workers=min(10, len(pending))) as pool:
+        resolved = dict(zip((id(h) for h in pending), pool.map(resolve, pending)))
+    out, seen = [], set()
+    for hit in hits:
+        if id(hit) in resolved:
+            url = resolved[id(hit)]
+            if not url:
+                continue
+            hit = Hit(title=hit.title, url=url, snippet=hit.snippet, published_date=hit.published_date)
+        if hit.url not in seen:
+            seen.add(hit.url)
+            out.append(hit)
+    return out
+
+
 def build_engines(settings: Settings, runner: ClaudeRunner) -> list:
     engines = []
     for name in settings.backends:
-        if name == "claude":
+        if name == "google" and settings.serp_proxy_url:
+            engines.append(ApifySerpEngine(settings))
+        elif name == "claude":
             engines.append(ClaudeEngine(runner, settings))
         elif name == "searxng" and settings.searxng_url:
             engines.append(SearxngEngine(settings))

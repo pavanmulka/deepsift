@@ -1,0 +1,22 @@
+{
+  "actorSpecification": 1,
+  "fields": {},
+  "views": {
+    "overview": {
+      "title": "Results",
+      "transformation": { "fields": ["query", "rank", "title", "url", "content", "publishedDate", "score"] },
+      "display": {
+        "component": "table",
+        "properties": {
+          "query": { "label": "Query" },
+          "rank": { "label": "#", "format": "number" },
+          "title": { "label": "Title" },
+          "url": { "label": "URL", "format": "link" },
+          "content": { "label": "Best passages" },
+          "publishedDate": { "label": "Published" },
+          "score": { "label": "Score", "format": "number" }
+        }
+      }
+    }
+  }
+}
