@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "deepsift-search": {
+      "type": "http",
+      "url": "https://aadstra--deepsift-search.apify.actor/mcp",
+      "headers": {
+        "Authorization": "Bearer ${user_config.apify_token}"
+      }
+    }
+  }
+}

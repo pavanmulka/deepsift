@@ -1,0 +1,19 @@
+{
+  "name": "deepsift-search",
+  "version": "0.1.0",
+  "description": "Live Google web search for Claude Code that returns only the passages that answer your question. Hosted on Apify, pay per use from $4 per 1,000 searches.",
+  "author": { "name": "Aadstra Labs", "url": "https://aadstra.com" },
+  "homepage": "https://apify.com/aadstra/deepsift-search",
+  "repository": "https://github.com/pavanmulka/deepsift",
+  "license": "MIT",
+  "keywords": ["web search", "search", "research", "tavily", "scraping", "rag", "mcp"],
+  "userConfig": {
+    "apify_token": {
+      "type": "string",
+      "title": "Apify API token",
+      "description": "Your token from https://console.apify.com/settings/integrations (a free Apify account includes $5 of monthly credit).",
+      "sensitive": true,
+      "required": true
+    }
+  }
+}

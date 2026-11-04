@@ -1,0 +1,23 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.pavanmulka/deepsift-search",
+  "title": "DeepSift Search",
+  "description": "Live Google web search for AI agents that returns only the passages that answer the question.",
+  "repository": { "url": "https://github.com/pavanmulka/deepsift", "source": "github" },
+  "websiteUrl": "https://apify.com/aadstra/deepsift-search",
+  "version": "0.1.0",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://aadstra--deepsift-search.apify.actor/mcp",
+      "headers": [
+        {
+          "name": "Authorization",
+          "description": "Bearer followed by your Apify API token (https://console.apify.com/settings/integrations)",
+          "isRequired": true,
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}

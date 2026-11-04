@@ -17,6 +17,29 @@ DeepSift does the same job on your own computer, in three steps:
 
 No per-call bill, no API key to buy.
 
+## Don't want to run it yourself? Use DeepSift Search on Apify
+
+<img src="assets/deepsift-icon.png" alt="DeepSift Search icon" width="64" align="right">
+
+**[DeepSift Search](https://apify.com/aadstra/deepsift-search)** is the hosted version: real Google results,
+the same passage picking, nothing to install, and it works for apps and teams, not just your own laptop.
+
+- **Tavily drop-in:** same `/search`, `/extract`, `/crawl` and `/map` requests and responses. Change one line:
+
+  ```python
+  from tavily import TavilyClient
+  client = TavilyClient(api_key="<YOUR_APIFY_TOKEN>", api_base_url="https://aadstra--deepsift-search.apify.actor")
+  ```
+
+- **MCP server for Claude, Cursor and others:** `https://aadstra--deepsift-search.apify.actor/mcp` with your
+  Apify token as a Bearer header.
+- **Claude Code plugin:** `/plugin marketplace add pavanmulka/deepsift`, then `/plugin install deepsift-search@deepsift`.
+  Claude Code asks for your Apify token once.
+- **Pay per use, no subscription:** $4 per 1,000 searches, $1 per 1,000 pages read. Failed requests are free, and a
+  free Apify account includes $5 of credit every month.
+
+The Apify version lives in `.actor/` and `deepsift/actor.py`; it never uses your Claude subscription.
+
 ## What Claude Code gets
 
 After installing, every Claude Code session has these tools:

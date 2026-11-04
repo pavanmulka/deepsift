@@ -1,0 +1,15 @@
+{
+  "name": "deepsift",
+  "description": "DeepSift web search tools for Claude Code by Aadstra Labs.",
+  "owner": {
+    "name": "Aadstra Labs",
+    "url": "https://aadstra.com"
+  },
+  "plugins": [
+    {
+      "name": "deepsift-search",
+      "source": "./claude-plugin",
+      "description": "Live Google web search for Claude Code that returns only the passages that answer your question (hosted on Apify, pay per use)."
+    }
+  ]
+}
