@@ -115,12 +115,12 @@ You only pay for what you use. Prices per event:
 
 | Event | Price |
 |---|---|
-| Search (basic or fast) | $0.005 ($5 per 1,000) |
-| Advanced search | $0.010 ($10 per 1,000) |
-| Page read (each page returned by `/extract` or `/crawl`) | $0.0015 ($1.50 per 1,000) |
+| Search (basic or fast) | $0.004 ($4 per 1,000) |
+| Advanced search | $0.008 ($8 per 1,000) |
+| Page read (each page returned by `/extract` or `/crawl`) | $0.001 ($1 per 1,000) |
 | Site map (each `/map` request) | $0.002 ($2 per 1,000) |
 
-Failed requests are not charged. You can set a maximum cost for each run, and DeepSift stops (and stops
+Platform usage is included: you pay only the prices above. Failed requests are not charged. You can set a maximum cost for each run, and DeepSift stops (and stops
 charging) when it is reached.
 
 For comparison, Tavily's published pay-as-you-go price is $0.008 per credit, and an advanced search uses two credits.
