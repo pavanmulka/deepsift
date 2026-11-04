@@ -1,20 +1,112 @@
 {
   "actorSpecification": 1,
-  "fields": {},
+  "fields": {
+    "type": "object",
+    "properties": {
+      "query": {
+        "type": "string",
+        "description": "The search this row belongs to.",
+        "example": "best open source vector database 2026"
+      },
+      "rank": {
+        "type": "integer",
+        "description": "Position in the results for this search, starting at 1.",
+        "example": 1
+      },
+      "title": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "Page title.",
+        "example": "The top open source vector databases & comparison"
+      },
+      "url": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "Page address.",
+        "example": "https://redis.io/blog/best-open-source-vector-databases-comparison/"
+      },
+      "content": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "The passages from the page that best answer the search.",
+        "example": "Qdrant is an open-source vector database written in Rust..."
+      },
+      "score": {
+        "type": [
+          "number",
+          "null"
+        ],
+        "description": "Relevance from 0 to 1.",
+        "example": 0.93
+      },
+      "publishedDate": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "Publication date (YYYY-MM-DD) when known.",
+        "example": "2026-03-05"
+      },
+      "fullPage": {
+        "type": [
+          "string",
+          "null"
+        ],
+        "description": "Full readable page text (only with includeFullPages)."
+      },
+      "error": {
+        "type": "string",
+        "description": "Present only when a search failed or found nothing."
+      }
+    }
+  },
   "views": {
     "overview": {
       "title": "Results",
-      "transformation": { "fields": ["query", "rank", "title", "url", "content", "publishedDate", "score"] },
+      "transformation": {
+        "fields": [
+          "query",
+          "rank",
+          "title",
+          "url",
+          "content",
+          "publishedDate",
+          "score"
+        ]
+      },
       "display": {
         "component": "table",
         "properties": {
-          "query": { "label": "Query" },
-          "rank": { "label": "#", "format": "number" },
-          "title": { "label": "Title" },
-          "url": { "label": "URL", "format": "link" },
-          "content": { "label": "Best passages" },
-          "publishedDate": { "label": "Published" },
-          "score": { "label": "Score", "format": "number" }
+          "query": {
+            "label": "Query"
+          },
+          "rank": {
+            "label": "#",
+            "format": "number"
+          },
+          "title": {
+            "label": "Title"
+          },
+          "url": {
+            "label": "URL",
+            "format": "link"
+          },
+          "content": {
+            "label": "Best passages"
+          },
+          "publishedDate": {
+            "label": "Published"
+          },
+          "score": {
+            "label": "Score",
+            "format": "number"
+          }
         }
       }
     }

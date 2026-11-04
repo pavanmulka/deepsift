@@ -1,0 +1,12 @@
+{
+  "actorOutputSchemaVersion": 1,
+  "title": "DeepSift Search output",
+  "properties": {
+    "results": {
+      "type": "string",
+      "title": "Search results",
+      "description": "One row per search result: query, rank, title, URL, best passages, score and published date.",
+      "template": "{{links.apiDefaultDatasetUrl}}/items?view=overview"
+    }
+  }
+}
