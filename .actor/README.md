@@ -1,6 +1,6 @@
 ## What does DeepSift Search do?
 
-DeepSift Search gives your AI agent live web search. You send one question; it searches Google, opens the
+DeepSift Search gives your AI agent live web search. You send one question; it searches Google and Yahoo at the same time, opens the
 best pages, and returns **only the passages that answer the question**, ready to drop into an LLM prompt.
 
 It speaks the **same request and response format as the Tavily API**. If your code already uses Tavily,
@@ -17,7 +17,8 @@ Use it three ways:
 - **Fewer tokens for your LLM.** You get the best few passages from each page, not whole pages of menus and cookie banners.
 - **Switch in a minute.** Same paths (`/search`, `/extract`, `/crawl`, `/map`), same fields, same response shape as Tavily.
 - **Pay per use, no subscription.** You pay per search on your Apify account. Failed searches are free.
-- **Real Google results.** Up-to-date pages, with country, language, date-range and website filters.
+- **Google and Yahoo results, merged.** Up-to-date pages, with country, language, date-range and website filters. If one search engine is slow or down, you still get the other's results.
+- **AI-picked passages.** A small AI model reads each page and keeps the passages that best answer your question.
 - **No extra API keys.** Your Apify token is the only key you need.
 
 ## How to use it as a Tavily drop-in
@@ -51,7 +52,7 @@ Supported endpoints:
 
 | Endpoint | What it does |
 |---|---|
-| `POST /search` | Search Google; returns the best passages from each result page |
+| `POST /search` | Search Google and Yahoo; returns the best passages from each result page |
 | `POST /extract` | Readable text of up to 20 pages or PDFs (optionally only the parts about a `query`) |
 | `POST /crawl` | Reads many pages of one website; `instructions` keeps the relevant ones |
 | `POST /map` | Lists a website's page addresses |
@@ -85,7 +86,7 @@ Your agent then has four tools: `web_search`, `web_read`, `web_map` and `web_cra
 | Field | Meaning |
 |---|---|
 | `queries` | List of searches (required) |
-| `searchDepth` | `basic` (best passage per page), `advanced` (up to three passages, longer page reads) or `fast` (Google snippets only) |
+| `searchDepth` | `basic` (best passage per page), `advanced` (up to three passages, longer page reads) or `fast` (search-engine snippets only) |
 | `maxResults` | Results per search, 1 to 20 (default 5) |
 | `topic` | `general`, `news` or `finance` |
 | `timeRange` | `day`, `week`, `month` or `year` |
@@ -134,7 +135,7 @@ For comparison, Tavily's published pay-as-you-go price is $0.008 per credit, and
 
 ## FAQ
 
-**Is it legal to use?** DeepSift reads public web pages and Google results pages. You are responsible for how you use the
+**Is it legal to use?** DeepSift reads public web pages and Google and Yahoo results pages. You are responsible for how you use the
 data. Don't use it to collect personal data without a legal basis (for example under GDPR).
 
 **Is DeepSift open source?** Yes. The self-hosted version for your own computer is free on

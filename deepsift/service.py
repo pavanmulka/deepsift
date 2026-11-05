@@ -64,7 +64,9 @@ class Service:
         self.fetcher = P.Fetcher(settings)
         self.store = Store(settings.data_dir / "deepsift.sqlite3")
         self.engines = build_engines(settings, self.claude)
-        self.reranker = Reranker(settings.reranker, settings.reranker_cache or None) if settings.reranker else None
+        self.reranker = (Reranker(settings.reranker, settings.reranker_cache or None, settings.reranker_threads or None,
+                                  settings.reranker_wait or None)
+                         if settings.reranker else None)
         self.counts: Dict[str, int] = {}
         self._count_lock = threading.Lock()
 
@@ -197,10 +199,12 @@ class Service:
         if self.settings.merge_engines and len(self.engines) > 1:
             hits, name = self._merge_engines(q)
             loose = _loosen(q.text)
-            if len(hits) * 2 < q.max_results and loose != q.text:
+            loose_engines = [e for e in self.engines
+                             if not self.settings.loose_backends or e.name in self.settings.loose_backends]
+            if len(hits) * 2 < q.max_results and loose != q.text and loose_engines:
                 # Exact phrases like "Acme (Pittsburgh, PA)" match almost nothing; look once more without quotes.
                 try:
-                    more, _ = self._merge_engines(replace(q, text=loose))
+                    more, _ = self._merge_engines(replace(q, text=loose), loose_engines)
                 except EngineError:
                     more = []
                 known = {_url_key(h.url) for h in hits}
@@ -220,16 +224,17 @@ class Service:
             return [], self.engines[-1].name
         raise EngineError("; ".join(errors))
 
-    def _merge_engines(self, q: Query) -> Tuple[List[Hit], str]:
+    def _merge_engines(self, q: Query, engines: Optional[List[Any]] = None) -> Tuple[List[Hit], str]:
         """Ask every engine at once; rank by reciprocal rank fusion so links several engines agree on come first."""
+        engines = engines or self.engines
         def run(engine: Any) -> Tuple[Any, List[Hit], Optional[str]]:
             try:
                 return engine, engine.search(q), None
             except EngineError as exc:
                 return engine, [], str(exc)
 
-        with ThreadPoolExecutor(max_workers=len(self.engines)) as pool:
-            answers = list(pool.map(run, self.engines))
+        with ThreadPoolExecutor(max_workers=len(engines)) as pool:
+            answers = list(pool.map(run, engines))
         scores: Dict[str, float] = {}
         best: Dict[str, Hit] = {}
         order: Dict[str, int] = {}
@@ -265,7 +270,8 @@ class Service:
             page = page_by_url.get(hit.url)
             candidates = []
             if page is not None and page.ok and depth in ("basic", "advanced"):
-                candidates = P.best_chunks(question, page.text, 3)
+                per_page = 3 if depth == "advanced" else self.settings.reranker_passages
+                candidates = P.best_chunks(question, page.text, per_page)
             if hit.snippet:
                 candidates.append(hit.snippet)
             if not candidates:

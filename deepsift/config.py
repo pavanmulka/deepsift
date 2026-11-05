@@ -18,6 +18,9 @@ class Settings:
     # True: ask every engine at once and merge their results (links found by several engines rank
     # higher) instead of stopping at the first engine that answers.
     merge_engines: bool = False
+    # With merge_engines: which engines the second round without quotes asks (empty = all of them).
+    # The Actor asks only free engines there, so a thin search never buys a second Google page.
+    loose_backends: List[str] = field(default_factory=list)
     # Optional self-hosted SearXNG (e.g. http://127.0.0.1:8888). Add "searxng" to backends.
     searxng_url: Optional[str] = None
     # Which of SearXNG's engines to ask (e.g. "yahoo"); empty = the instance's own defaults.
@@ -35,6 +38,15 @@ class Settings:
     # Xenova/ms-marco-MiniLM-L-6-v2. Empty = word-count ranking only.
     reranker: str = ""
     reranker_cache: str = ""
+    # CPU threads for the scorer; 0 = one per CPU the machine reports. Set 1 in small containers
+    # (an Apify Actor with 1 GB gets a quarter of a core but sees every core of the host).
+    reranker_threads: int = 0
+    # Seconds a search waits while the scorer works on another one before it falls back to word
+    # counting; 0 = wait as long as it takes.
+    reranker_wait: float = 0.0
+    # Candidate passages per page the scorer compares for a basic search (advanced always uses 3).
+    # Fewer = faster on small machines.
+    reranker_passages: int = 3
     # False on hosted copies: no `claude -p`, so no written answers and no research reports.
     llm_enabled: bool = True
     claude_bin: str = "claude"
@@ -77,12 +89,16 @@ def load() -> Settings:
     return Settings(
         backends=_list(env.get("DEEPSIFT_BACKENDS", "")) or defaults.backends,
         merge_engines=env.get("DEEPSIFT_MERGE", "0").lower() in ("1", "true", "yes", "on"),
+        loose_backends=_list(env.get("DEEPSIFT_LOOSE_BACKENDS", "")),
         searxng_url=env.get("DEEPSIFT_SEARXNG_URL") or None,
         searxng_engines=env.get("DEEPSIFT_SEARXNG_ENGINES", ""),
         serp_proxy_url=env.get("DEEPSIFT_SERP_PROXY_URL") or None,
         google_timeout=float(env.get("DEEPSIFT_GOOGLE_TIMEOUT", defaults.google_timeout)),
         reranker=env.get("DEEPSIFT_RERANKER", ""),
         reranker_cache=env.get("DEEPSIFT_RERANKER_CACHE", ""),
+        reranker_threads=int(env.get("DEEPSIFT_RERANKER_THREADS", defaults.reranker_threads) or 0),
+        reranker_wait=float(env.get("DEEPSIFT_RERANKER_WAIT", defaults.reranker_wait) or 0),
+        reranker_passages=max(1, min(3, int(env.get("DEEPSIFT_RERANKER_PASSAGES", defaults.reranker_passages) or 3))),
         google_retries=int(env.get("DEEPSIFT_GOOGLE_RETRIES", defaults.google_retries)),
         api_key=env.get("DEEPSIFT_API_KEY", ""),
         llm_enabled=env.get("DEEPSIFT_LLM", "1").lower() not in ("0", "false", "no", "off"),

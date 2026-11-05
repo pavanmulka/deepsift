@@ -66,3 +66,34 @@ def test_broken_scorer_falls_back_to_word_ranking(tmp_path):
     hits = [Hit(title="A", url="https://a.com", snippet="alpha")]
     out = make(tmp_path, FakeReranker(broken=True), hits, {}).search({"query": "alpha"})
     assert [r["url"] for r in out["results"]] == ["https://a.com"]
+
+
+def test_busy_scorer_gives_up_after_wait():
+    import pytest
+    from deepsift.rerank import Reranker, ScorerBusy
+
+    class Model:
+        def rerank(self, question, passages, batch_size=8):
+            return [1.0 for _ in passages]
+
+    r = Reranker("fake", wait=0.05)
+    r._model = Model()
+    assert r.scores("q", ["a", "b"]) == [1.0, 1.0]
+    r._lock.acquire()  # another search is being scored
+    try:
+        with pytest.raises(ScorerBusy):
+            r.scores("q", ["a"])
+    finally:
+        r._lock.release()
+    assert r.scores("q", ["a"]) == [1.0]
+
+
+def test_basic_search_scores_fewer_passages_when_asked(tmp_path):
+    hits = [Hit(title="T", url="https://t.com", snippet="snip")]
+    text = "\n\n".join("Teladoc finance paragraph number %d with words." % i for i in range(8))
+    pages = {"https://t.com": P.Page(url="https://t.com", title="T", text=text)}
+    fake = FakeReranker()
+    s = make(tmp_path, fake, hits, pages)
+    s.settings = Settings(backends=["ddg"], data_dir=tmp_path, llm_enabled=False, reranker_passages=1)
+    s.search({"query": "Teladoc finance"})
+    assert len(fake.calls[0][1]) == 2  # one page passage + the snippet

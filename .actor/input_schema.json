@@ -15,7 +15,7 @@
     "searchDepth": {
       "title": "Search depth",
       "type": "string",
-      "description": "basic: the best passage from each page. advanced: up to three passages per page, reads pages longer (charged as an advanced search). fast: Google snippets only, no page reading.",
+      "description": "basic: the best passage from each page. advanced: up to three passages per page, reads pages longer (charged as an advanced search). fast: search-engine snippets only, no page reading.",
       "editor": "select",
       "enum": [
         "basic",

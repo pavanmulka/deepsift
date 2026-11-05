@@ -25,15 +25,23 @@ def to_unit(logit: float) -> float:
     return 1.0 / (1.0 + math.exp(-max(-30.0, min(30.0, logit))))
 
 
+class ScorerBusy(RuntimeError):
+    """The scorer is working on another search; the caller ranks this one by word count instead."""
+
+
 class Reranker:
-    def __init__(self, model: str, cache_dir: Optional[str] = None, threads: Optional[int] = None) -> None:
+    def __init__(self, model: str, cache_dir: Optional[str] = None, threads: Optional[int] = None,
+                 wait: Optional[float] = None) -> None:
         self.model_name = model
         self._cache_dir = cache_dir
         self._threads = threads
+        self._wait = wait  # seconds to wait for a busy scorer; None = as long as it takes
         self._model = None
         self._lock = threading.Lock()
 
     def _load(self):
+        if self._model is not None:
+            return self._model
         with self._lock:
             if self._model is None:
                 from fastembed.rerank.cross_encoder import TextCrossEncoder
@@ -48,5 +56,11 @@ class Reranker:
         if not passages:
             return []
         model = self._load()
-        with self._lock:  # one ONNX session; keep calls one at a time
+        # One ONNX session; calls go one at a time. On a small machine several searches at once would
+        # queue here for many seconds, so after `wait` seconds give up and let word counting rank it.
+        if not self._lock.acquire(timeout=-1 if self._wait is None else self._wait):
+            raise ScorerBusy("AI scorer busy")
+        try:
             return [float(s) for s in model.rerank(question, [p[:600] for p in passages], batch_size=8)]
+        finally:
+            self._lock.release()

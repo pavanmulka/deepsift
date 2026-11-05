@@ -21,7 +21,7 @@ No per-call bill, no API key to buy.
 
 <img src="assets/deepsift-icon.png" alt="DeepSift Search icon" width="64" align="right">
 
-**[DeepSift Search](https://apify.com/aadstra/deepsift-search)** is the hosted version: real Google results,
+**[DeepSift Search](https://apify.com/aadstra/deepsift-search)** is the hosted version: Google and Yahoo results,
 the same passage picking, nothing to install, and it works for apps and teams, not just your own laptop.
 
 - **Tavily drop-in:** same `/search`, `/extract`, `/crawl` and `/map` requests and responses. Change one line:

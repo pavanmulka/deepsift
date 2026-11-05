@@ -4,6 +4,7 @@
 - searxng: a self-hosted SearXNG instance (free, fastest)
 - ddg:     DuckDuckGo's HTML page (free, no key; a fallback)
 - google:  Google through Apify's GOOGLE_SERP proxy (used by the hosted Apify Actor)
+- yahoo:   Yahoo's results page, one plain request per page (used next to Google by the Actor)
 """
 from __future__ import annotations
 
@@ -353,6 +354,91 @@ class ApifySerpEngine:
         return hits
 
 
+class YahooEngine:
+    """Yahoo's normal results page, read directly: one plain request per page, no proxy.
+
+    A refused or failed request is not retried, nor sent through other addresses: the search then
+    simply goes on with the other engines' results.
+    """
+    name = "yahoo"
+    _BTF = {"day": "d", "week": "w", "month": "m"}
+    PER_PAGE = 7
+
+    def __init__(self, settings: Settings) -> None:
+        self._ua = settings.user_agent
+        self.pages_fetched = 0
+
+    def _params(self, q: Query, page: int) -> Dict[str, str]:
+        text = q.text
+        if q.include_domains and len(q.include_domains) <= 5:
+            text += " (" + " OR ".join("site:" + d for d in q.include_domains) + ")"
+        if q.exclude_domains:
+            text += " " + " ".join("-site:" + d for d in q.exclude_domains[:5])
+        params = {"p": text, "ei": "UTF-8"}
+        tr = self._BTF.get(normalize_time_range(q.time_range) or "")
+        if tr:
+            params["btf"] = tr
+        if page:
+            params["b"] = str(page * self.PER_PAGE + 1)
+        return params
+
+    def search(self, q: Query) -> List[Hit]:
+        targets = site_targets(q.text)
+        hits: List[Hit] = []
+        for page in range(2 if q.max_results > self.PER_PAGE else 1):
+            try:
+                response = httpx.get(
+                    "https://search.yahoo.com/search",
+                    params=self._params(q, page),
+                    headers={"User-Agent": self._ua, "Accept-Language": (q.language or "en") + "-US,en;q=0.9"},
+                    timeout=8.0,
+                    follow_redirects=True,
+                )
+                self.pages_fetched += 1
+                response.raise_for_status()
+            except httpx.HTTPError as exc:
+                if hits:
+                    break
+                raise EngineError("yahoo: %s" % exc) from exc
+            found = only_sites(parse_yahoo_html(response.text), targets)
+            known = {h.url for h in hits}
+            hits.extend(h for h in found if h.url not in known)
+            if len(found) < 5:
+                break
+        return hits
+
+
+def _yahoo_target(href: str) -> str:
+    """Yahoo's click-tracking link -> the real page: .../RU=https%3a%2f%2fexample.com%2f/RK=2/RS=..."""
+    match = re.search(r"/RU=([^/]+)/R[KS]=", href or "")
+    return unquote(match.group(1)) if match else (href or "")
+
+
+def parse_yahoo_html(markup: str) -> List[Hit]:
+    try:
+        tree = lxml_html.fromstring(markup or "<html/>")
+    except Exception:
+        return []
+    hits: List[Hit] = []
+    seen = set()
+    for block in tree.xpath('//div[contains(concat(" ", normalize-space(@class), " "), " algo-sr ")]'):
+        link = block.xpath('.//div[contains(@class, "compTitle")]//a[@href] | .//h3//a[@href]')
+        if not link:
+            continue
+        url = _yahoo_target(link[0].get("href"))
+        host = (urlsplit(url).hostname or "").lower()
+        if not url.startswith("http") or host.endswith("yahoo.com") or url in seen:
+            continue
+        title_el = block.xpath(".//h3")
+        title = " ".join((title_el[0].text_content() if title_el else link[0].text_content()).split())
+        text_el = block.xpath('.//div[contains(@class, "compText")]')
+        snippet = " ".join(text_el[0].text_content().split()) if text_el else ""
+        snippet, date = _snippet_date(snippet)
+        seen.add(url)
+        hits.append(Hit(title=title, url=url, snippet=snippet, published_date=date))
+    return hits
+
+
 _SITE = re.compile(r"(?<![\w-])site:(\S+)", re.I)
 
 
@@ -530,6 +616,8 @@ def build_engines(settings: Settings, runner: ClaudeRunner) -> list:
             engines.append(SearxngEngine(settings))
         elif name == "ddg":
             engines.append(DuckDuckGoEngine(settings))
+        elif name == "yahoo":
+            engines.append(YahooEngine(settings))
     if not engines:
         raise RuntimeError("no search engines configured (DEEPSIFT_BACKENDS)")
     return engines

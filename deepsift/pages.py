@@ -4,6 +4,7 @@ from __future__ import annotations
 import io
 import math
 import re
+import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -82,7 +83,7 @@ class Fetcher:
 
         raw = bytes(body)
         if "pdf" in content_type or raw[:5] == b"%PDF-":
-            page.text = _pdf_text(raw)
+            page.text = _pdf_text(raw, seconds=timeout)
             page.title = page.final_url.rsplit("/", 1)[-1]
         elif "html" in content_type or "xml" in content_type or not content_type:
             _fill_from_html(page, raw.decode(encoding, errors="replace"), fmt, depth, want_links)
@@ -99,13 +100,22 @@ class Fetcher:
         return list(self._pool.map(lambda u: self.fetch(u, **kwargs), urls))
 
 
-def _pdf_text(raw: bytes) -> str:
+def _pdf_text(raw: bytes, seconds: Optional[float] = None) -> str:
+    """Text of the first 200 pages; with `seconds`, stop after that long and keep what was read.
+
+    A 300-page annual report takes minutes on a small machine (a quarter CPU core on Apify).
+    """
+    deadline = time.monotonic() + seconds if seconds else None
+    parts: List[str] = []
     try:
         from pypdf import PdfReader
-        reader = PdfReader(io.BytesIO(raw))
-        return "\n\n".join((p.extract_text() or "") for p in reader.pages[:200]).strip()
+        for page in PdfReader(io.BytesIO(raw)).pages[:200]:
+            parts.append(page.extract_text() or "")
+            if deadline is not None and time.monotonic() > deadline:
+                break
     except Exception:
-        return ""
+        pass
+    return "\n\n".join(parts).strip()
 
 
 def _fill_from_html(page: Page, markup: str, fmt: str, depth: str, want_links: bool) -> None:

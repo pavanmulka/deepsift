@@ -210,3 +210,21 @@ def test_goto_links_resolve_to_real_addresses(monkeypatch):
     out = E.resolve_goto_links(hits, "ua")
     # unresolvable B dropped, duplicate of A dropped, plain link kept in order
     assert [(h.title, h.url) for h in out] == [("A", "https://redis.io/blog/vdb/"), ("C", "https://example.com/")]
+
+
+def test_pdf_reading_stops_at_the_time_limit(monkeypatch):
+    import pypdf
+
+    clock = iter(range(0, 1000, 3))  # every page "takes" 3 seconds
+    monkeypatch.setattr(P.time, "monotonic", lambda: next(clock))
+
+    class FakePage:
+        def __init__(self, n):
+            self.n = n
+
+        def extract_text(self):
+            return "page %d" % self.n
+
+    monkeypatch.setattr(pypdf, "PdfReader", lambda stream: type("R", (), {"pages": [FakePage(i) for i in range(300)]})())
+    assert P._pdf_text(b"%PDF-", seconds=7).split("\n\n") == ["page 0", "page 1", "page 2"]
+    assert len(P._pdf_text(b"%PDF-").split("\n\n")) == 200  # no limit: the first 200 pages

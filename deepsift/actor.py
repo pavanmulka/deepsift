@@ -5,7 +5,8 @@ Two ways to use it:
   server at /mcp for Claude, Cursor and other AI apps. Apify checks the caller's Apify token.
 - Normal run: a list of search queries in the input, one dataset row per search result.
 
-Search goes through Apify's GOOGLE_SERP proxy. Nothing here calls `claude -p`: a hosted copy
+Search asks Google (through Apify's GOOGLE_SERP proxy) and Yahoo (plain requests) at the same
+time and merges the two. Nothing here calls `claude -p`: a hosted copy
 must never run on the owner's personal Claude subscription, so written answers and research
 reports are switched off.
 """
@@ -15,6 +16,8 @@ import asyncio
 import dataclasses
 import logging
 import os
+import threading
+import time
 from typing import Any, Dict, List, Optional
 
 import anyio
@@ -27,7 +30,7 @@ from .mcp_server import build_server
 from .service import BadRequest, Service
 
 INSTRUCTIONS = (
-    "Live web search for AI agents. web_search searches Google for one topic and returns the most "
+    "Live web search for AI agents. web_search searches Google and Yahoo for one topic and returns the most "
     "relevant passages from each result page in one go. web_read returns the readable text of pages "
     "you already know. web_map lists a site's pages; web_crawl reads many pages of one site."
 )
@@ -42,9 +45,16 @@ async def build_service() -> Service:
     proxy_url = await proxy.new_url() if proxy else None
     if not proxy_url:
         raise RuntimeError("Apify GOOGLE_SERP proxy is not available (run on Apify, or `apify login` first)")
-    settings = dataclasses.replace(settings, backends=["google"], serp_proxy_url=proxy_url,
+    # Google and Yahoo at once, merged; a search fails only when both fail. The second round without
+    # quotes (for searches that found too little) asks Yahoo only, so it never buys a Google page.
+    settings = dataclasses.replace(settings, backends=["google", "yahoo"], merge_engines=True,
+                                   loose_backends=["yahoo"], serp_proxy_url=proxy_url,
                                    api_key="", llm_enabled=False)
-    return Service(settings)
+    service = Service(settings)
+    if service.reranker is not None:
+        # Load the AI scorer while the first Google page is on its way, not after it.
+        threading.Thread(target=service.reranker.warm, daemon=True).start()
+    return service
 
 
 def budget_left(events: List[str]) -> bool:
@@ -157,6 +167,10 @@ async def save_empty_page(service: Service, query: str) -> None:
             Actor.log.warning("No results for %r; saved Google's page as EMPTY_GOOGLE_PAGE", query)
 
 
+def google_pages(service: Service) -> int:
+    return sum(engine.pages_fetched for engine in service.engines if engine.name == "google")
+
+
 async def run_batch(service: Service) -> None:
     actor_input = await Actor.get_input() or {}
     queries = [q.strip() for q in actor_input.get("queries") or [] if isinstance(q, str) and q.strip()]
@@ -170,6 +184,7 @@ async def run_batch(service: Service) -> None:
         if not budget_left([event]):
             Actor.log.info("Spending limit reached after %d searches", done)
             break
+        started, pages_before = time.monotonic(), google_pages(service)
         try:
             response = await anyio.to_thread.run_sync(service.search, body)
         except BadRequest as exc:
@@ -181,6 +196,9 @@ async def run_batch(service: Service) -> None:
             continue
         await Actor.charge(event_name=event)
         rows = result_rows(query, response)
+        Actor.log.info("Search %d of %d: %d results in %.1f s from %s, %d Google page(s)", done + 1,
+                       len(queries), len(rows), time.monotonic() - started, response.get("engine") or "-",
+                       google_pages(service) - pages_before)
         if not rows:
             await save_empty_page(service, query)
         await Actor.push_data(rows or [{"query": query, "error": "no results"}])
