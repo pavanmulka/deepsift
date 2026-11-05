@@ -19,7 +19,8 @@ class Settings:
     searxng_url: Optional[str] = None
     # Required bearer key. Empty means no key check (fine on 127.0.0.1 only).
     api_key: str = ""
-    # Google search through Apify's GOOGLE_SERP proxy (set by the Apify Actor, never from .env).
+    # Google search through Apify's GOOGLE_SERP proxy. The Apify Actor sets it itself; a self-hosted
+    # server sets DEEPSIFT_SERP_PROXY_URL (http://groups-GOOGLE_SERP:<proxy password>@proxy.apify.com:8000).
     serp_proxy_url: Optional[str] = None
     # False on hosted copies: no `claude -p`, so no written answers and no research reports.
     llm_enabled: bool = True
@@ -63,6 +64,7 @@ def load() -> Settings:
     return Settings(
         backends=_list(env.get("DEEPSIFT_BACKENDS", "")) or defaults.backends,
         searxng_url=env.get("DEEPSIFT_SEARXNG_URL") or None,
+        serp_proxy_url=env.get("DEEPSIFT_SERP_PROXY_URL") or None,
         api_key=env.get("DEEPSIFT_API_KEY", ""),
         llm_enabled=env.get("DEEPSIFT_LLM", "1").lower() not in ("0", "false", "no", "off"),
         claude_bin=env.get("DEEPSIFT_CLAUDE_BIN", defaults.claude_bin),

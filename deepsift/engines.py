@@ -286,6 +286,10 @@ class ApifySerpEngine:
             params["tbs"] = ",".join(tbs)
         if q.topic == "news":
             params["tbm"] = "nws"
+        elif q.include_domains or site_targets(q.text):
+            # When few pages match a site: search, Google's normal view fills up with other websites;
+            # the plain "Web" view (udm=14) shows only the real matches.
+            params["udm"] = "14"
         # The proxy picks an exit country at random, so always say which Google to ask.
         code = ""
         if q.country:
@@ -317,12 +321,43 @@ class ApifySerpEngine:
                     break
                 raise EngineError("google: %s" % exc) from exc
             self.last_html = response.text
-            found = resolve_goto_links(parse_google_html(response.text), self._ua)
+            found = only_sites(resolve_goto_links(parse_google_html(response.text), self._ua), site_targets(q.text))
             known = {h.url for h in hits}
             hits.extend(h for h in found if h.url not in known)
             if len(found) < 5:
                 break
         return hits
+
+
+_SITE = re.compile(r"(?<![\w-])site:(\S+)", re.I)
+
+
+def site_targets(text: str) -> List[Tuple[str, str]]:
+    """(host, path prefix) for each site: operator in a query, e.g. site:linkedin.com/in/ -> ("linkedin.com", "/in")."""
+    targets = []
+    for raw in _SITE.findall(text or ""):
+        raw = raw.strip("\"'()").lower()
+        raw = re.sub(r"^https?://", "", raw)
+        host, _, path = raw.partition("/")
+        host = host.removeprefix("www.")
+        if host:
+            targets.append((host, ("/" + path).rstrip("/") if path else ""))
+    return targets
+
+
+def only_sites(hits: List[Hit], targets: List[Tuple[str, str]]) -> List[Hit]:
+    """Keep only results on the websites a site: operator asked for (any of them)."""
+    if not targets:
+        return hits
+
+    def ok(url: str) -> bool:
+        parts = urlsplit(url)
+        host = (parts.hostname or "").lower()
+        path = parts.path.lower()
+        return any((host == h or host.endswith("." + h)) and (not p or path == p or path.startswith(p + "/"))
+                   for h, p in targets)
+
+    return [h for h in hits if ok(h.url)]
 
 
 _COUNTRY_CODES = {
