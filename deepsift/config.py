@@ -15,13 +15,26 @@ def _list(value: str) -> List[str]:
 class Settings:
     # Search engines tried in order until one returns results.
     backends: List[str] = field(default_factory=lambda: ["claude", "ddg"])
+    # True: ask every engine at once and merge their results (links found by several engines rank
+    # higher) instead of stopping at the first engine that answers.
+    merge_engines: bool = False
     # Optional self-hosted SearXNG (e.g. http://127.0.0.1:8888). Add "searxng" to backends.
     searxng_url: Optional[str] = None
+    # Which of SearXNG's engines to ask (e.g. "yahoo"); empty = the instance's own defaults.
+    searxng_engines: str = ""
     # Required bearer key. Empty means no key check (fine on 127.0.0.1 only).
     api_key: str = ""
     # Google search through Apify's GOOGLE_SERP proxy. The Apify Actor sets it itself; a self-hosted
     # server sets DEEPSIFT_SERP_PROXY_URL (http://groups-GOOGLE_SERP:<proxy password>@proxy.apify.com:8000).
     serp_proxy_url: Optional[str] = None
+    # Seconds to wait for one Google results page, and how many more tries after a timeout or an
+    # empty page (failed proxy requests are not billed).
+    google_timeout: float = 20.0
+    google_retries: int = 0
+    # Optional AI scorer that runs on this machine (needs `fastembed`), e.g.
+    # Xenova/ms-marco-MiniLM-L-6-v2. Empty = word-count ranking only.
+    reranker: str = ""
+    reranker_cache: str = ""
     # False on hosted copies: no `claude -p`, so no written answers and no research reports.
     llm_enabled: bool = True
     claude_bin: str = "claude"
@@ -63,8 +76,14 @@ def load() -> Settings:
     defaults = Settings()
     return Settings(
         backends=_list(env.get("DEEPSIFT_BACKENDS", "")) or defaults.backends,
+        merge_engines=env.get("DEEPSIFT_MERGE", "0").lower() in ("1", "true", "yes", "on"),
         searxng_url=env.get("DEEPSIFT_SEARXNG_URL") or None,
+        searxng_engines=env.get("DEEPSIFT_SEARXNG_ENGINES", ""),
         serp_proxy_url=env.get("DEEPSIFT_SERP_PROXY_URL") or None,
+        google_timeout=float(env.get("DEEPSIFT_GOOGLE_TIMEOUT", defaults.google_timeout)),
+        reranker=env.get("DEEPSIFT_RERANKER", ""),
+        reranker_cache=env.get("DEEPSIFT_RERANKER_CACHE", ""),
+        google_retries=int(env.get("DEEPSIFT_GOOGLE_RETRIES", defaults.google_retries)),
         api_key=env.get("DEEPSIFT_API_KEY", ""),
         llm_enabled=env.get("DEEPSIFT_LLM", "1").lower() not in ("0", "false", "no", "off"),
         claude_bin=env.get("DEEPSIFT_CLAUDE_BIN", defaults.claude_bin),

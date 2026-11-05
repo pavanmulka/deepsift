@@ -12,6 +12,8 @@ import threading
 import time
 import uuid
 from collections import deque
+from dataclasses import replace
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional, Tuple
 from urllib import robotparser
 from urllib.parse import urlsplit
@@ -20,6 +22,7 @@ from . import pages as P
 from .claude_cli import ClaudeError, ClaudeRunner
 from .config import Settings
 from .engines import EngineError, Hit, Query, build_engines
+from .rerank import Reranker, clean_question, to_unit
 from .store import Store
 
 
@@ -61,6 +64,7 @@ class Service:
         self.fetcher = P.Fetcher(settings)
         self.store = Store(settings.data_dir / "deepsift.sqlite3")
         self.engines = build_engines(settings, self.claude)
+        self.reranker = Reranker(settings.reranker, settings.reranker_cache or None) if settings.reranker else None
         self.counts: Dict[str, int] = {}
         self._count_lock = threading.Lock()
 
@@ -138,11 +142,14 @@ class Service:
             )
             page_by_url = {p.url: p for p in fetched}
 
+        ai = self._ai_passages(query, hits, page_by_url, depth, chunks) if self.reranker else {}
         results = []
         for rank, hit in enumerate(hits):
             page = page_by_url.get(hit.url)
             content = hit.snippet
-            if page is not None and page.ok and depth in ("basic", "advanced"):
+            if hit.url in ai:
+                content = ai[hit.url][1]
+            elif page is not None and page.ok and depth in ("basic", "advanced"):
                 best = P.best_chunks(query, page.text, chunks if depth == "advanced" else 1)
                 if best:
                     content = " [...] ".join(best)
@@ -154,6 +161,7 @@ class Service:
                 "content": content,
                 "score": 0.0,
                 "_rank": rank,
+                "_ai": ai[hit.url][0] if hit.url in ai else None,
                 "id": str(uuid.uuid5(uuid.NAMESPACE_URL, hit.url)),
             }
             if raw_fmt:
@@ -170,6 +178,7 @@ class Service:
         results = results[:max_results]
         for row in results:
             row.pop("_rank", None)
+            row.pop("_ai", None)
 
         response: Dict[str, Any] = {"query": query, "follow_up_questions": None, "answer": None,
                                     "images": [], "results": results}
@@ -185,6 +194,18 @@ class Service:
         return response
 
     def _run_engines(self, q: Query) -> Tuple[List[Hit], str]:
+        if self.settings.merge_engines and len(self.engines) > 1:
+            hits, name = self._merge_engines(q)
+            loose = _loosen(q.text)
+            if len(hits) * 2 < q.max_results and loose != q.text:
+                # Exact phrases like "Acme (Pittsburgh, PA)" match almost nothing; look once more without quotes.
+                try:
+                    more, _ = self._merge_engines(replace(q, text=loose))
+                except EngineError:
+                    more = []
+                known = {_url_key(h.url) for h in hits}
+                hits = hits + [h for h in more if _url_key(h.url) not in known]
+            return hits[:q.max_results], name
         errors = []
         for engine in self.engines:
             try:
@@ -198,6 +219,73 @@ class Service:
         if errors and all("no results" in e for e in errors):
             return [], self.engines[-1].name
         raise EngineError("; ".join(errors))
+
+    def _merge_engines(self, q: Query) -> Tuple[List[Hit], str]:
+        """Ask every engine at once; rank by reciprocal rank fusion so links several engines agree on come first."""
+        def run(engine: Any) -> Tuple[Any, List[Hit], Optional[str]]:
+            try:
+                return engine, engine.search(q), None
+            except EngineError as exc:
+                return engine, [], str(exc)
+
+        with ThreadPoolExecutor(max_workers=len(self.engines)) as pool:
+            answers = list(pool.map(run, self.engines))
+        scores: Dict[str, float] = {}
+        best: Dict[str, Hit] = {}
+        order: Dict[str, int] = {}
+        used = []
+        for position, (engine, hits, _) in enumerate(answers):
+            if hits:
+                used.append(engine.name)
+            for rank, hit in enumerate(hits):
+                key = _url_key(hit.url)
+                scores[key] = scores.get(key, 0.0) + 1.0 / (60 + rank)
+                if key not in best:
+                    best[key] = hit
+                    order[key] = position * 1000 + rank
+                elif not best[key].snippet and hit.snippet:
+                    best[key] = Hit(title=best[key].title or hit.title, url=best[key].url, snippet=hit.snippet,
+                                    published_date=best[key].published_date or hit.published_date)
+                elif not best[key].published_date and hit.published_date:
+                    best[key].published_date = hit.published_date
+        if not best:
+            errors = [err for _, _, err in answers if err]
+            if len(errors) == len(answers):  # an engine that answered "nothing found" is an answer
+                raise EngineError("; ".join(errors))
+            return [], "+".join(e.name for e, _, err in answers if not err)
+        keys = sorted(best, key=lambda k: (-scores[k], order[k]))[:q.max_results]  # only what we'll read
+        return [best[k] for k in keys], "+".join(used)
+
+    def _ai_passages(self, query: str, hits: List[Hit], page_by_url: Dict[str, "P.Page"], depth: str,
+                     chunks: int) -> Dict[str, Tuple[float, str]]:
+        """AI-score each result's best candidate passages: url -> (best raw score, content to return)."""
+        question = clean_question(query) or query
+        jobs: List[Tuple[str, str, str]] = []  # (url, passage, text the scorer reads)
+        for hit in hits:
+            page = page_by_url.get(hit.url)
+            candidates = []
+            if page is not None and page.ok and depth in ("basic", "advanced"):
+                candidates = P.best_chunks(question, page.text, 3)
+            if hit.snippet:
+                candidates.append(hit.snippet)
+            if not candidates:
+                candidates = [hit.title]
+            for passage in candidates:
+                jobs.append((hit.url, passage, (hit.title + ". " + passage).strip()))
+        try:
+            raw = self.reranker.scores(question, [j[2] for j in jobs])
+        except Exception:  # a missing or broken model must never break search
+            return {}
+        by_url: Dict[str, List[Tuple[float, int, str]]] = {}
+        for i, ((url, passage, _), score) in enumerate(zip(jobs, raw)):
+            by_url.setdefault(url, []).append((score, i, passage))
+        out: Dict[str, Tuple[float, str]] = {}
+        keep = chunks if depth == "advanced" else 1
+        for url, scored in by_url.items():
+            top = sorted(scored, key=lambda t: -t[0])[:keep]
+            content = " [...] ".join(p for _, _, p in sorted(top, key=lambda t: t[1]))
+            out[url] = (top[0][0], content)
+        return out
 
     def _filter_and_score(self, results: List[Dict[str, Any]], query: str, body: Dict[str, Any]) -> List[Dict[str, Any]]:
         if _bool(body, "exact_match") and '"' in query:
@@ -213,9 +301,17 @@ class Service:
             results = kept
         if not results:
             return results
+        n = len(results)
+        if any(r.get("_ai") is not None for r in results):
+            # The AI scorer decides; the engines' own order only breaks near-ties.
+            for r in results:
+                position = 1.0 - r["_rank"] / max(n, 1)
+                ai = to_unit(r["_ai"]) if r.get("_ai") is not None else 0.0
+                r["score"] = round(0.85 * ai + 0.15 * position, 4)
+            results.sort(key=lambda r: -r["score"])
+            return results
         relevance = P.bm25(query, [r["title"] + " " + r["content"] for r in results])
         top = max(relevance) or 1.0
-        n = len(results)
         for r, rel in zip(results, relevance):
             position = 1.0 - r["_rank"] / max(n, 1)
             r["score"] = round(0.35 + 0.4 * position + 0.25 * (rel / top), 4)
@@ -545,3 +641,15 @@ def _date_window(body: Dict[str, Any]) -> Tuple[Optional[str], Optional[str]]:
     if days and not lo:
         lo = (dt.date.today() - dt.timedelta(days=days)).isoformat()
     return lo, hi
+
+
+def _url_key(url: str) -> str:
+    """The same page as different engines write it: no scheme, no www., no trailing slash or fragment."""
+    parts = urlsplit(url)
+    host = (parts.hostname or "").lower().removeprefix("www.")
+    return host + parts.path.rstrip("/") + ("?" + parts.query if parts.query else "")
+
+
+def _loosen(text: str) -> str:
+    """Drop quotes and brackets but keep site: and the words: '"Acme (Ayer, MA)" CFO' -> 'Acme Ayer, MA CFO'."""
+    return " ".join(re.sub(r'["()]', " ", text).split())

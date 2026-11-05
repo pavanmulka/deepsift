@@ -142,6 +142,7 @@ class SearxngEngine:
         if not settings.searxng_url:
             raise EngineError("searxng: DEEPSIFT_SEARXNG_URL is not set")
         self._base = settings.searxng_url.rstrip("/")
+        self._engines = settings.searxng_engines.strip()
 
     def search(self, q: Query) -> List[Hit]:
         text = q.text
@@ -156,6 +157,9 @@ class SearxngEngine:
         if q.language:
             params["language"] = q.language
         params["safesearch"] = "1" if q.safe_search else "0"
+        if self._engines:
+            params["engines"] = self._engines
+        targets = site_targets(q.text)
         hits: List[Hit] = []
         for page in (1, 2):
             params["pageno"] = str(page)
@@ -167,13 +171,14 @@ class SearxngEngine:
                 if hits:
                     break
                 raise EngineError("searxng: %s" % exc) from exc
-            for row in rows:
-                hits.append(Hit(
-                    title=row.get("title") or "",
-                    url=row.get("url") or "",
-                    snippet=row.get("content") or "",
-                    published_date=(row.get("publishedDate") or "")[:10] or None,
-                ))
+            found = only_sites([Hit(
+                title=row.get("title") or "",
+                url=row.get("url") or "",
+                snippet=row.get("content") or "",
+                published_date=(row.get("publishedDate") or "")[:10] or None,
+            ) for row in rows], targets)
+            known = {h.url for h in hits}
+            hits.extend(h for h in found if h.url and h.url not in known)
             if len(hits) >= q.max_results or not rows:
                 break
         return hits
@@ -264,6 +269,8 @@ class ApifySerpEngine:
             raise EngineError("google: no Apify GOOGLE_SERP proxy configured")
         self._proxy = settings.serp_proxy_url
         self._ua = settings.user_agent
+        self._timeout = settings.google_timeout
+        self._retries = max(0, settings.google_retries)
         self.pages_fetched = 0
         self.last_html = ""  # the last results page, kept so empty searches can be diagnosed
 
@@ -301,27 +308,44 @@ class ApifySerpEngine:
             params["start"] = str(start)
         return params
 
-    def search(self, q: Query) -> List[Hit]:
-        hits: List[Hit] = []
-        pages = 1 if q.max_results <= self.ONE_PAGE else 2
-        for page in range(pages):
+    def _page(self, q: Query, start: int) -> List[Hit]:
+        """One results page; tries again after a timeout, a proxy error or a page with no results."""
+        last: Optional[Exception] = None
+        for _ in range(1 + self._retries):
             try:
                 response = httpx.get(
                     "http://www.google.com/search",
-                    params=self._params(q, page * 10),
+                    params=self._params(q, start),
                     headers={"User-Agent": self._ua, "Accept-Language": (q.language or "en") + ";q=0.9"},
                     proxy=self._proxy,
-                    timeout=20,
+                    timeout=self._timeout,
                     follow_redirects=True,
                 )
                 self.pages_fetched += 1
                 response.raise_for_status()
             except httpx.HTTPError as exc:
+                last = exc
+                continue
+            self.last_html = response.text
+            parsed = parse_google_html(response.text)
+            if parsed or start:
+                return parsed
+            last = None  # an empty first page: worth one more look
+        if last is not None:
+            raise EngineError("google: %s" % last)
+        return []
+
+    def search(self, q: Query) -> List[Hit]:
+        hits: List[Hit] = []
+        pages = 1 if q.max_results <= self.ONE_PAGE else 2
+        for page in range(pages):
+            try:
+                parsed = self._page(q, page * 10)
+            except EngineError:
                 if hits:
                     break
-                raise EngineError("google: %s" % exc) from exc
-            self.last_html = response.text
-            found = only_sites(resolve_goto_links(parse_google_html(response.text), self._ua), site_targets(q.text))
+                raise
+            found = only_sites(resolve_goto_links(parsed, self._ua), site_targets(q.text))
             known = {h.url for h in hits}
             hits.extend(h for h in found if h.url not in known)
             if len(found) < 5:

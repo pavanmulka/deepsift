@@ -11,6 +11,16 @@ WORKDIR /app
 COPY requirements.txt ./
 RUN grep -v '^pytest' requirements.txt > /tmp/req.txt && pip install --no-cache-dir -r /tmp/req.txt lxml
 
+# The AI scorer (DEEPSIFT_RERANKER). The model is downloaded once at build time, so the server never
+# fetches it at run time. Build with --build-arg RERANKER= to leave it out.
+ARG RERANKER=Xenova/ms-marco-MiniLM-L-6-v2
+ENV DEEPSIFT_RERANKER_CACHE=/models
+RUN if [ -n "$RERANKER" ]; then \
+      pip install --no-cache-dir fastembed==0.9.0 && \
+      python -c "from fastembed.rerank.cross_encoder import TextCrossEncoder as T; T('$RERANKER', cache_dir='/models')" && \
+      chmod -R a+rX /models; \
+    fi
+
 COPY deepsift ./deepsift
 
 ENV DEEPSIFT_LLM=0 \
