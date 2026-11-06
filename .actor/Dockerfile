@@ -22,10 +22,12 @@ COPY deepsift ./deepsift
 COPY actor_main.py ./
 
 # Hosted copies never call `claude -p` (see deepsift/actor.py).
-# Google: one try, 8 s. Yahoo is asked at the same time and answers in under a second, so a
-# second Google try would only make the search wait longer (and an empty page tried again is
-# billed again). Tested on Apify 2026-11-05: retries did not get more Google pages back.
+# Google: one try, no retries (tested on Apify 2026-11-05: retries did not get more Google pages
+# back). About 1 Google page in 6 takes 13-30 s. Yahoo is asked at the same time and usually
+# answers in under a second, so once Yahoo has brought results the search stops waiting for Google
+# after 8 s; only when Yahoo failed does it keep waiting for Google, up to 20 s.
 ENV DEEPSIFT_LLM=0 \
-    DEEPSIFT_GOOGLE_TIMEOUT=8 \
+    DEEPSIFT_GOOGLE_TIMEOUT=20 \
+    DEEPSIFT_MERGE_PATIENCE=8 \
     DEEPSIFT_GOOGLE_RETRIES=0
 CMD ["python3", "actor_main.py"]

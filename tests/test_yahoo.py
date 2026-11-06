@@ -1,6 +1,7 @@
 """The built-in Yahoo engine (used next to Google by the Apify Actor) and the Yahoo-only loose round."""
 import gzip
 import pathlib
+import time
 
 import httpx
 import pytest
@@ -130,6 +131,49 @@ def test_loose_round_asks_only_the_chosen_engines(tmp_path):
     assert google.queries == ['"Acme (Ayer, MA)" CFO']  # one Google page only
     assert yahoo.queries == ['"Acme (Ayer, MA)" CFO', "Acme Ayer, MA CFO"]
     assert name == "google+yahoo"
+
+
+class Slow(Fake):
+    def __init__(self, name, hits, seconds, fail=False):
+        super().__init__(name, hits)
+        self.seconds, self.fail = seconds, fail
+
+    def search(self, q):
+        time.sleep(self.seconds)
+        if self.fail:
+            raise EngineError(self.name + ": 500")
+        return super().search(q)
+
+
+def merging(tmp_path, patience):
+    return Service(Settings(backends=["ddg"], merge_engines=True, merge_patience=patience, data_dir=tmp_path,
+                            llm_enabled=False))
+
+
+def test_slow_engine_is_left_behind_once_another_has_results(tmp_path):
+    s = merging(tmp_path, 0.2)
+    s.engines = [Slow("google", [Hit(title="g", url="https://g.com")], 1.5),
+                 Slow("yahoo", [Hit(title="y", url="https://y.com")], 0.0)]
+    started = time.monotonic()
+    hits, name = s._merge_engines(Query(text="acme", max_results=5))
+    assert time.monotonic() - started < 1.0
+    assert [h.url for h in hits] == ["https://y.com"] and name == "yahoo"
+
+
+def test_slow_engine_is_waited_for_when_nothing_else_came_back(tmp_path):
+    s = merging(tmp_path, 0.1)
+    s.engines = [Slow("google", [Hit(title="g", url="https://g.com")], 0.5),
+                 Slow("yahoo", [], 0.0, fail=True)]
+    hits, name = s._merge_engines(Query(text="acme", max_results=5))
+    assert [h.url for h in hits] == ["https://g.com"] and name == "google"
+
+
+def test_without_patience_every_engine_is_waited_for(tmp_path):
+    s = merging(tmp_path, 0)
+    s.engines = [Slow("google", [Hit(title="g", url="https://g.com")], 0.3),
+                 Slow("yahoo", [Hit(title="y", url="https://y.com")], 0.0)]
+    hits, name = s._merge_engines(Query(text="acme", max_results=5))
+    assert name == "google+yahoo" and len(hits) == 2
 
 
 def test_build_engines_knows_yahoo():

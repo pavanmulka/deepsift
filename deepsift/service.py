@@ -13,7 +13,7 @@ import time
 import uuid
 from collections import deque
 from dataclasses import replace
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from typing import Any, Dict, List, Optional, Tuple
 from urllib import robotparser
 from urllib.parse import urlsplit
@@ -233,8 +233,7 @@ class Service:
             except EngineError as exc:
                 return engine, [], str(exc)
 
-        with ThreadPoolExecutor(max_workers=len(engines)) as pool:
-            answers = list(pool.map(run, engines))
+        answers = self._ask_engines(run, engines)
         scores: Dict[str, float] = {}
         best: Dict[str, Hit] = {}
         order: Dict[str, int] = {}
@@ -260,6 +259,31 @@ class Service:
             return [], "+".join(e.name for e, _, err in answers if not err)
         keys = sorted(best, key=lambda k: (-scores[k], order[k]))[:q.max_results]  # only what we'll read
         return [best[k] for k in keys], "+".join(used)
+
+    def _ask_engines(self, run: Any, engines: List[Any]) -> List[Tuple[Any, List[Hit], Optional[str]]]:
+        """Run every engine at once; with merge_patience, stop waiting for slow ones once another has results.
+
+        Answers come back in the engines' own order; an engine left behind counts as having timed out.
+        """
+        patience = self.settings.merge_patience
+        pool = ThreadPoolExecutor(max_workers=len(engines))
+        try:
+            futures = [pool.submit(run, engine) for engine in engines]
+            if patience > 0:
+                deadline = time.monotonic() + patience
+                pending = set(futures)
+                while pending:
+                    left = deadline - time.monotonic()
+                    have_hits = any(f.done() and f.result()[1] for f in futures)
+                    if left <= 0 and have_hits:
+                        break
+                    done, pending = wait(pending, timeout=max(left, 0) or None, return_when=FIRST_COMPLETED)
+            else:
+                wait(futures)
+            return [f.result() if f.done() else (e, [], "%s: still waiting after %.0f s" % (e.name, patience))
+                    for f, e in zip(futures, engines)]
+        finally:
+            pool.shutdown(wait=False)  # a slow engine left behind finishes on its own; nobody waits for it
 
     def _ai_passages(self, query: str, hits: List[Hit], page_by_url: Dict[str, "P.Page"], depth: str,
                      chunks: int) -> Dict[str, Tuple[float, str]]:

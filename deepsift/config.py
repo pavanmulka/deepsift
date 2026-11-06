@@ -34,6 +34,10 @@ class Settings:
     # empty page (failed proxy requests are not billed).
     google_timeout: float = 20.0
     google_retries: int = 0
+    # When engines are merged: seconds after which a search stops waiting for slow engines if another
+    # one has already brought results. A slow engine is then waited for (up to its own timeout)
+    # only when nothing else came back. 0 = always wait for every engine.
+    merge_patience: float = 0.0
     # Optional AI scorer that runs on this machine (needs `fastembed`), e.g.
     # Xenova/ms-marco-MiniLM-L-6-v2. Empty = word-count ranking only.
     reranker: str = ""
@@ -94,6 +98,7 @@ def load() -> Settings:
         searxng_engines=env.get("DEEPSIFT_SEARXNG_ENGINES", ""),
         serp_proxy_url=env.get("DEEPSIFT_SERP_PROXY_URL") or None,
         google_timeout=float(env.get("DEEPSIFT_GOOGLE_TIMEOUT", defaults.google_timeout)),
+        merge_patience=float(env.get("DEEPSIFT_MERGE_PATIENCE", defaults.merge_patience) or 0),
         reranker=env.get("DEEPSIFT_RERANKER", ""),
         reranker_cache=env.get("DEEPSIFT_RERANKER_CACHE", ""),
         reranker_threads=int(env.get("DEEPSIFT_RERANKER_THREADS", defaults.reranker_threads) or 0),
