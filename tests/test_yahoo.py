@@ -71,17 +71,44 @@ def test_yahoo_request_filters_sites_and_reads_page_two_only_when_needed(monkeyp
     assert len(calls) == 1  # 5 wanted: one page is enough
 
 
-def test_yahoo_refusal_is_an_error_and_never_retried(monkeypatch):
+def test_yahoo_server_error_gets_exactly_one_more_try(monkeypatch):
+    calls = []
+
+    def flaky(*a, **kw):
+        calls.append(1)
+        return Resp(status=500) if len(calls) == 1 else Resp(text=SAMPLE)
+
+    monkeypatch.setattr(E.httpx, "get", flaky)
+    monkeypatch.setattr(E.YahooEngine, "RETRY_PAUSE", 0)
+    hits = E.YahooEngine(Settings()).search(Query(text="x", max_results=5))
+    assert len(calls) == 2 and hits
+
+    calls.clear()
+    monkeypatch.setattr(E.httpx, "get", lambda *a, **kw: calls.append(1) or Resp(status=500))
+    with pytest.raises(EngineError):
+        E.YahooEngine(Settings()).search(Query(text="x"))
+    assert calls == [1, 1]  # two server errors: give up, never a third try
+
+
+@pytest.mark.parametrize("status", [403, 429])
+def test_yahoo_refusal_is_an_error_and_never_retried(monkeypatch, status):
     calls = []
 
     def refuse(*a, **kw):
         calls.append(1)
-        return Resp(status=500)
+        return Resp(status=status)
 
     monkeypatch.setattr(E.httpx, "get", refuse)
     with pytest.raises(EngineError):
         E.YahooEngine(Settings()).search(Query(text="x"))
     assert calls == [1]
+
+
+def test_read_more_link_text_is_dropped_from_previews():
+    assert E._clean_snippet("Exa Search starts at $4 per 1,000 requests ...Read more") == \
+        "Exa Search starts at $4 per 1,000 requests ..."
+    assert E._clean_snippet("Prices went up. Read more") == "Prices went up."
+    assert E._clean_snippet("Read more about it") == "Read more about it"
 
 
 class Fake:

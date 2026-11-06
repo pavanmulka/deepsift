@@ -265,32 +265,43 @@ class Service:
                      chunks: int) -> Dict[str, Tuple[float, str]]:
         """AI-score each result's best candidate passages: url -> (best raw score, content to return)."""
         question = clean_question(query) or query
-        jobs: List[Tuple[str, str, str]] = []  # (url, passage, text the scorer reads)
+        jobs: List[Tuple[str, str, str, bool]] = []  # (url, passage, text the scorer reads, from the page?)
         for hit in hits:
             page = page_by_url.get(hit.url)
             candidates = []
             if page is not None and page.ok and depth in ("basic", "advanced"):
                 per_page = 3 if depth == "advanced" else self.settings.reranker_passages
-                candidates = P.best_chunks(question, page.text, per_page)
+                candidates = [(c, True) for c in P.best_chunks(question, page.text, per_page)]
             if hit.snippet:
-                candidates.append(hit.snippet)
+                candidates.append((hit.snippet, False))
             if not candidates:
-                candidates = [hit.title]
-            for passage in candidates:
-                jobs.append((hit.url, passage, (hit.title + ". " + passage).strip()))
+                candidates = [(hit.title, False)]
+            for passage, from_page in candidates:
+                jobs.append((hit.url, passage, (hit.title + ". " + passage).strip(), from_page))
         try:
             raw = self.reranker.scores(question, [j[2] for j in jobs])
         except Exception:  # a missing or broken model must never break search
             return {}
-        by_url: Dict[str, List[Tuple[float, int, str]]] = {}
-        for i, ((url, passage, _), score) in enumerate(zip(jobs, raw)):
-            by_url.setdefault(url, []).append((score, i, passage))
+        by_url: Dict[str, List[Tuple[float, int, str, bool]]] = {}
+        for i, ((url, passage, _, from_page), score) in enumerate(zip(jobs, raw)):
+            by_url.setdefault(url, []).append((score, i, passage, from_page))
         out: Dict[str, Tuple[float, str]] = {}
         keep = chunks if depth == "advanced" else 1
         for url, scored in by_url.items():
-            top = sorted(scored, key=lambda t: -t[0])[:keep]
-            content = " [...] ".join(p for _, _, p in sorted(top, key=lambda t: t[1]))
-            out[url] = (top[0][0], content)
+            best_score = max(s for s, _, _, _ in scored)
+            from_page = [t for t in scored if t[3]]
+            if not from_page:  # the page could not be read: the engine's preview is all there is
+                top = sorted(scored, key=lambda t: -t[0])[:keep]
+                out[url] = (best_score, " [...] ".join(p for _, _, p, _ in sorted(top, key=lambda t: t[1])))
+                continue
+            # Text from the page itself always comes back. The engine's short preview often scores a
+            # little higher; then it goes in front of the page text instead of replacing it.
+            top = sorted(from_page, key=lambda t: -t[0])[:keep]
+            content = " [...] ".join(p for _, _, p, _ in sorted(top, key=lambda t: t[1]))
+            preview = [t for t in scored if not t[3]]
+            if preview and preview[0][0] > top[0][0] and preview[0][2] not in content:
+                content = preview[0][2].rstrip() + " " + content
+            out[url] = (best_score, content)
         return out
 
     def _filter_and_score(self, results: List[Dict[str, Any]], query: str, body: Dict[str, Any]) -> List[Dict[str, Any]]:

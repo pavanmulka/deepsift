@@ -355,10 +355,13 @@ class ApifySerpEngine:
 
 
 class YahooEngine:
-    """Yahoo's normal results page, read directly: one plain request per page, no proxy.
+    """Yahoo's normal results page, read directly: plain requests, no proxy.
 
-    A refused or failed request is not retried, nor sent through other addresses: the search then
-    simply goes on with the other engines' results.
+    Yahoo answers about 1 request in 4 with a passing "500 INKApi Error"; the same request from
+    the same address a second later almost always works (measured from Apify 2026-11-06: 75% on
+    the first try, 94% after one more). So a server error gets exactly one more try after a short
+    pause. A refusal (403, 429, a challenge page) is never retried and nothing is ever sent
+    through other addresses: the search then simply goes on with the other engines' results.
     """
     name = "yahoo"
     _BTF = {"day": "d", "week": "w", "month": "m"}
@@ -382,19 +385,27 @@ class YahooEngine:
             params["b"] = str(page * self.PER_PAGE + 1)
         return params
 
+    RETRY_PAUSE = 1.0
+
+    def _get(self, q: Query, page: int) -> httpx.Response:
+        self.pages_fetched += 1
+        return httpx.get(
+            "https://search.yahoo.com/search",
+            params=self._params(q, page),
+            headers={"User-Agent": self._ua, "Accept-Language": (q.language or "en") + "-US,en;q=0.9"},
+            timeout=8.0,
+            follow_redirects=True,
+        )
+
     def search(self, q: Query) -> List[Hit]:
         targets = site_targets(q.text)
         hits: List[Hit] = []
         for page in range(2 if q.max_results > self.PER_PAGE else 1):
             try:
-                response = httpx.get(
-                    "https://search.yahoo.com/search",
-                    params=self._params(q, page),
-                    headers={"User-Agent": self._ua, "Accept-Language": (q.language or "en") + "-US,en;q=0.9"},
-                    timeout=8.0,
-                    follow_redirects=True,
-                )
-                self.pages_fetched += 1
+                response = self._get(q, page)
+                if response.status_code >= 500:
+                    time.sleep(self.RETRY_PAUSE)
+                    response = self._get(q, page)
                 response.raise_for_status()
             except httpx.HTTPError as exc:
                 if hits:
@@ -433,7 +444,7 @@ def parse_yahoo_html(markup: str) -> List[Hit]:
         title = " ".join((title_el[0].text_content() if title_el else link[0].text_content()).split())
         text_el = block.xpath('.//div[contains(@class, "compText")]')
         snippet = " ".join(text_el[0].text_content().split()) if text_el else ""
-        snippet, date = _snippet_date(snippet)
+        snippet, date = _snippet_date(_clean_snippet(snippet))
         seen.add(url)
         hits.append(Hit(title=title, url=url, snippet=snippet, published_date=date))
     return hits
@@ -538,6 +549,17 @@ def _snippet_date(snippet: str, now: Optional[float] = None) -> Tuple[str, Optio
     return snippet.strip(), None
 
 
+_READ_MORE = re.compile(r"\s*(\.{3}|…)?\s*Read more\s*$", re.I)
+
+
+def _clean_snippet(snippet: str) -> str:
+    """Drop the 'Read more' link text Google puts at the end of some previews."""
+    if not _READ_MORE.search(snippet):
+        return snippet
+    snippet = _READ_MORE.sub("", snippet).rstrip()
+    return snippet if snippet.endswith((".", "!", "?", "…")) else snippet + " ..."
+
+
 def parse_google_html(markup: str) -> List[Hit]:
     """Organic results from a Google results page: every link that wraps an <h3> title."""
     tree = lxml_html.fromstring(markup)
@@ -565,7 +587,7 @@ def parse_google_html(markup: str) -> List[Hit]:
                 snippet = " ".join(found[0].text_content().split())
                 break
             node = node.getparent()
-        snippet, date = _snippet_date(snippet)
+        snippet, date = _snippet_date(_clean_snippet(snippet))
         seen.add(url)
         hits.append(Hit(title=title, url=url, snippet=snippet, published_date=date))
     return hits

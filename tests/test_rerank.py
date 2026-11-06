@@ -97,3 +97,20 @@ def test_basic_search_scores_fewer_passages_when_asked(tmp_path):
     s.settings = Settings(backends=["ddg"], data_dir=tmp_path, llm_enabled=False, reranker_passages=1)
     s.search({"query": "Teladoc finance"})
     assert len(fake.calls[0][1]) == 2  # one page passage + the snippet
+
+
+def test_page_text_is_kept_when_the_preview_scores_higher(tmp_path):
+    hits = [Hit(title="Deal", url="https://news.com/deal", snippet="Nebius Tavily price 275 million")]
+    pages = {"https://news.com/deal": P.Page(url="https://news.com/deal", title="Deal",
+                                             text="Nebius agreed to buy Tavily for up to $400 million.")}
+    out = make(tmp_path, FakeReranker(), hits, pages).search({"query": "Nebius Tavily price", "max_results": 1})
+    content = out["results"][0]["content"]
+    assert content.startswith("Nebius Tavily price 275 million")  # the higher-scoring preview goes first
+    assert "up to $400 million" in content  # but the page's own text is never dropped
+
+
+def test_preview_is_used_alone_when_the_page_could_not_be_read(tmp_path):
+    hits = [Hit(title="Deal", url="https://news.com/deal", snippet="Nebius paid 275 million")]
+    out = make(tmp_path, FakeReranker(), hits, {}).search({"query": "Nebius price", "max_results": 1})
+    assert out["results"][0]["content"] == "Nebius paid 275 million"
+
