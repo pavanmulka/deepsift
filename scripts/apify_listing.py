@@ -1,4 +1,4 @@
-"""Set the Apify Store search-engine title/description for DeepSift Search.
+"""Set the Apify Store description and search-engine title/description for DeepSift Search.
 
 The icon must be uploaded in Apify Console (Source > Publication); the API refuses outside picture links.
 
@@ -14,8 +14,12 @@ ACTOR = "aadstra~deepsift-search"
 token = os.environ.get("APIFY_TOKEN") or sys.exit("Set APIFY_TOKEN first (see the top of this file).")
 changes = {
     "seoTitle": "Cheap Tavily alternative: web search API for AI agents",
-    "seoDescription": "Google search API for AI agents and RAG that returns only the passages that answer "
-                      "the question. Tavily-compatible, MCP for Claude. From $4 per 1,000.",
+    "seoDescription": "Google and Yahoo search API for AI agents and RAG that returns only the passages "
+                      "that answer the question. Tavily-compatible, MCP for Claude. From $4 per 1,000.",
+    # Console edits stop `apify push` from updating the Store description, so it is set here too.
+    "description": "Search Google and Yahoo and get back only the passages that answer your question, in the "
+                   "same format as the Tavily API. Works as a drop-in Tavily replacement, an MCP server for "
+                   "Claude and Cursor, or a batch search tool.",
 }
 r = httpx.put("https://api.apify.com/v2/acts/" + ACTOR, json=changes, timeout=30,
               headers={"Authorization": "Bearer " + token})
