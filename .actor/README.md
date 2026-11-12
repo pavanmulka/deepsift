@@ -1,3 +1,5 @@
+![DeepSift Search: live web search for AI agents, with /search, /extract, /map, /crawl and /mcp](https://raw.githubusercontent.com/pavanmulka/deepsift/main/assets/deepsift-banner.png)
+
 ## What does DeepSift Search do?
 
 DeepSift Search gives your AI agent live web search. You send one question; it searches Google and Yahoo at the same time, opens the

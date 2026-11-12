@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="300" viewBox="0 0 1600 300" role="img"
+     aria-label="DeepSift Search: live web search for AI agents. Endpoints: /search, /extract, /map, /crawl and /mcp.">
+  <defs>
+    <clipPath id="card"><rect width="1600" height="300" rx="28"/></clipPath>
+
+    <!-- blue, lavender, pink, peach, yellow: one sweep used for the mark and the endpoints -->
+    <linearGradient id="sweep" gradientUnits="userSpaceOnUse" x1="880" y1="0" x2="1528" y2="0">
+      <stop offset="0" stop-color="#8AB8FF"/>
+      <stop offset=".3" stop-color="#B9A8FF"/>
+      <stop offset=".58" stop-color="#F7A4C9"/>
+      <stop offset=".8" stop-color="#FFC39B"/>
+      <stop offset="1" stop-color="#FFE08A"/>
+    </linearGradient>
+    <linearGradient id="markSweep" gradientUnits="userSpaceOnUse" x1="100" y1="100" x2="420" y2="420">
+      <stop offset="0" stop-color="#8AB8FF"/>
+      <stop offset=".5" stop-color="#F7A4C9"/>
+      <stop offset="1" stop-color="#FFE08A"/>
+    </linearGradient>
+    <linearGradient id="edge" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8AB8FF" stop-opacity=".55"/>
+      <stop offset=".5" stop-color="#FFFFFF" stop-opacity=".08"/>
+      <stop offset="1" stop-color="#FFE08A" stop-opacity=".45"/>
+    </linearGradient>
+
+    <radialGradient id="glowBlue" cx="150" cy="60" r="620" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4F7DFF" stop-opacity=".42"/>
+      <stop offset="1" stop-color="#4F7DFF" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowPink" cx="1240" cy="330" r="560" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F472B6" stop-opacity=".26"/>
+      <stop offset="1" stop-color="#F472B6" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowGold" cx="1600" cy="0" r="420" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFD166" stop-opacity=".16"/>
+      <stop offset="1" stop-color="#FFD166" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- fine grid that fades out toward the edges -->
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0H0V40" fill="none" stroke="#FFFFFF" stroke-opacity=".07" stroke-width="1"/>
+    </pattern>
+    <radialGradient id="gridFade" cx="800" cy="150" r="820" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="1"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <mask id="gridMask"><rect width="1600" height="300" fill="url(#gridFade)"/></mask>
+
+    <style>
+      .name   { font: 800 68px 'Inter Variable', 'Inter', -apple-system, 'Helvetica Neue', Arial, sans-serif; letter-spacing: -1.8px; fill: #FFFFFF; }
+      .name .soft { font-weight: 500; fill-opacity: .72; }
+      .line   { font: 500 26px 'Inter Variable', 'Inter', -apple-system, 'Helvetica Neue', Arial, sans-serif; fill: #AAB3C5; }
+      .label  { font: 600 19px 'Inter Variable', 'Inter', -apple-system, 'Helvetica Neue', Arial, sans-serif; letter-spacing: 2.6px; fill: #8F98AC; text-anchor: end; }
+      .paths  { font: 600 30px ui-monospace, 'SF Mono', Menlo, Consolas, monospace; fill: url(#sweep); text-anchor: end; }
+    </style>
+  </defs>
+
+  <g clip-path="url(#card)">
+    <rect width="1600" height="300" fill="#0B0D13"/>
+    <rect width="1600" height="300" fill="url(#grid)" mask="url(#gridMask)"/>
+    <rect width="1600" height="300" fill="url(#glowBlue)"/>
+    <rect width="1600" height="300" fill="url(#glowPink)"/>
+    <rect width="1600" height="300" fill="url(#glowGold)"/>
+
+    <!-- DeepSift's own lens: ring and handle in the sweep, three sifted passages in blue, pink and yellow -->
+    <g transform="translate(52 54) scale(.24)">
+      <circle cx="224" cy="224" r="118" fill="#FFFFFF" fill-opacity=".06" stroke="url(#markSweep)" stroke-width="30"/>
+      <line x1="312" y1="312" x2="404" y2="404" stroke="url(#markSweep)" stroke-width="44" stroke-linecap="round"/>
+      <rect x="160" y="178" width="128" height="22" rx="11" fill="#8AB8FF"/>
+      <rect x="160" y="216" width="96" height="22" rx="11" fill="#F7A4C9"/>
+      <rect x="160" y="254" width="60" height="22" rx="11" fill="#FFE08A"/>
+    </g>
+
+    <text class="name" x="180" y="140">DeepSift<tspan class="soft" dx="16">Search</tspan></text>
+    <text class="line" x="74" y="218">Live web search for AI agents. Only the passages that answer.</text>
+
+    <text class="paths" x="1528" y="140" xml:space="preserve">/search  /extract  /map  /crawl  /mcp</text>
+    <text class="label" x="1528" y="217">DROP-IN SEARCH API  ·  MCP SERVER</text>
+  </g>
+
+  <!-- hairline edge -->
+  <rect x=".75" y=".75" width="1598.5" height="298.5" rx="27.25" fill="none" stroke="url(#edge)" stroke-width="1.5"/>
+</svg>
