@@ -65,7 +65,7 @@ jobs:
           USER: ${{ secrets.DEEPSIFT_VPS_USER }}
         run: |
           test -n "$HOST" && test -n "$USER" || { echo "Missing VPS host or user"; exit 1; }
-          rsync -az --relative --exclude='__pycache__/' --exclude='*.pyc' \
+          rsync -rz --relative --exclude='__pycache__/' --exclude='*.pyc' \
             deepsift/ deploy/ requirements.txt \
             "$USER@$HOST:/docker/21streach-deepsift/src/"
       - name: Rebuild and restart only DeepSift
