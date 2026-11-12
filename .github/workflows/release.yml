@@ -65,15 +65,32 @@ jobs:
           USER: ${{ secrets.DEEPSIFT_VPS_USER }}
         run: |
           test -n "$HOST" && test -n "$USER" || { echo "Missing VPS host or user"; exit 1; }
-          rsync -rz --relative --exclude='__pycache__/' --exclude='*.pyc' \
-            deepsift/ deploy/ requirements.txt \
-            "$USER@$HOST:/docker/21streach-deepsift/src/"
+          # GitHub-hosted runners can occasionally time out at the VPS network edge.
+          # Retry only SSH transport failures, never permission or data errors.
+          ssh_opts='-o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=12 -o ConnectionAttempts=1'
+          for attempt in 1 2 3; do
+            if ssh $ssh_opts "$USER@$HOST" 'true'; then break; fi
+            if [ "$attempt" = 3 ]; then echo 'VPS SSH unreachable after 3 checks'; exit 1; fi
+            sleep $((attempt * 5))
+          done
+          for attempt in 1 2 3; do
+            set +e
+            rsync -rz --relative --exclude='__pycache__/' --exclude='*.pyc' \
+              -e "ssh $ssh_opts" deepsift/ deploy/ requirements.txt \
+              "$USER@$HOST:/docker/21streach-deepsift/src/"
+            rc=$?
+            set -e
+            if [ "$rc" = 0 ]; then break; fi
+            if [ "$rc" != 255 ] || [ "$attempt" = 3 ]; then exit "$rc"; fi
+            echo "Transient SSH transport error; retry $attempt/3"
+            sleep $((attempt * 5))
+          done
       - name: Rebuild and restart only DeepSift
         env:
           HOST: ${{ secrets.DEEPSIFT_VPS_HOST }}
           USER: ${{ secrets.DEEPSIFT_VPS_USER }}
         run: |
-          ssh "$USER@$HOST" 'set -eu; cd /docker/21streach-deepsift; docker compose build deepsift; docker compose up -d --no-deps deepsift; for n in $(seq 1 24); do state=$(docker inspect -f "{{.State.Health.Status}}" 21streach-deepsift); if [ "$state" = healthy ]; then exit 0; fi; if [ "$state" = unhealthy ]; then echo "DeepSift unhealthy"; exit 1; fi; sleep 5; done; echo "DeepSift health check timed out"; exit 1'
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=12 "$USER@$HOST" 'set -eu; cd /docker/21streach-deepsift; docker compose build deepsift; docker compose up -d --no-deps deepsift; for n in $(seq 1 24); do state=$(docker inspect -f "{{.State.Health.Status}}" 21streach-deepsift); if [ "$state" = healthy ]; then exit 0; fi; if [ "$state" = unhealthy ]; then echo "DeepSift unhealthy"; exit 1; fi; sleep 5; done; echo "DeepSift health check timed out"; exit 1'
       - name: Report release
         run: echo "VPS deployment attempted from commit ${GITHUB_SHA}. Confirm app search endpoint and docker health."
 
