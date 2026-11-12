@@ -11,6 +11,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 import anyio
 from mcp.server.mcpserver import MCPServer
+from mcp.types import ToolAnnotations
 
 from . import config
 from .engines import EngineError
@@ -39,12 +40,24 @@ def _clean(body: Dict[str, Any]) -> Dict[str, Any]:
     return {k: v for k, v in body.items() if v not in (None, [], "")}
 
 
+def _labels(title: str, *, repeat_safe: bool = True, open_web: bool = True) -> Dict[str, Any]:
+    """The name people see, plus the four hints AI apps and directories read before running a tool.
+
+    Every tool here only reads: it changes nothing on the web or in anyone's account. So
+    readOnlyHint is always true and destructiveHint always false. repeat_safe=False marks a tool
+    that starts a new run on every call; open_web=False marks one that never goes out to the web.
+    """
+    return {"title": title, "annotations": ToolAnnotations(
+        title=title, read_only_hint=True, destructive_hint=False,
+        idempotent_hint=repeat_safe, open_world_hint=open_web)}
+
+
 def build_server(get_service: Callable[[], Service], *, call: Call = plain_call, research: bool = True,
                  instructions: str = LOCAL_INSTRUCTIONS, name: str = "deepsift") -> MCPServer:
     """The tools, bound to one Service. The hosted Apify Actor passes a charging `call` and research=False."""
     server = MCPServer(name=name, instructions=instructions)
 
-    @server.tool()
+    @server.tool(**_labels("Web Search"))
     async def web_search(
         query: str,
         max_results: int = 6,
@@ -73,7 +86,7 @@ def build_server(get_service: Callable[[], Service], *, call: Call = plain_call,
         })
         return await call("search", get_service().search, body)
 
-    @server.tool()
+    @server.tool(**_labels("Read Web Pages"))
     async def web_read(urls: List[str], focus: Optional[str] = None, max_passages: int = 3) -> Dict[str, Any]:
         """Read up to 20 web pages or PDFs and return their text.
 
@@ -82,14 +95,14 @@ def build_server(get_service: Callable[[], Service], *, call: Call = plain_call,
         body = _clean({"urls": urls, "query": focus, "chunks_per_source": max_passages if focus else None})
         return await call("extract", get_service().extract, body)
 
-    @server.tool()
+    @server.tool(**_labels("Map a Website"))
     async def web_map(url: str, max_depth: int = 1, limit: int = 50, instructions: Optional[str] = None) -> Dict[str, Any]:
         """List the pages of a website (addresses only), following links up to max_depth clicks from the start page."""
         body = _clean({"url": url, "max_depth": max_depth, "limit": limit, "instructions": instructions,
                        "allow_external": False})
         return await call("map", get_service().map, body)
 
-    @server.tool()
+    @server.tool(**_labels("Crawl a Website"))
     async def web_crawl(url: str, instructions: Optional[str] = None, max_depth: int = 1, limit: int = 15) -> Dict[str, Any]:
         """Read many pages of one website. instructions (e.g. "pricing and plans") keeps the related pages and passages."""
         body = _clean({"url": url, "instructions": instructions, "max_depth": max_depth, "limit": limit,
@@ -97,7 +110,7 @@ def build_server(get_service: Callable[[], Service], *, call: Call = plain_call,
         return await call("crawl", get_service().crawl, body)
 
     if research:
-        @server.tool()
+        @server.tool(**_labels("Web Research Report", repeat_safe=False))
         async def web_research(question: str, thorough: bool = False, wait_minutes: float = 10) -> Dict[str, Any]:
             """Run a full investigation (many searches, many pages) and return a written report with numbered sources.
 
@@ -116,7 +129,7 @@ def build_server(get_service: Callable[[], Service], *, call: Call = plain_call,
             return {"request_id": started["request_id"], "status": "in_progress",
                     "note": "Still running. Call web_research_result with this request_id."}
 
-        @server.tool()
+        @server.tool(**_labels("Get Research Report", open_web=False))
         async def web_research_result(request_id: str) -> Dict[str, Any]:
             """Get the report of a web_research run that was still going."""
             return get_service().research_status(request_id) or {"error": "unknown request_id"}

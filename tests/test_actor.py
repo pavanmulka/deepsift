@@ -166,6 +166,11 @@ def test_hosted_mcp_tools_charge_per_call(hosted):
                                 "clientInfo": {"name": "test", "version": "1"}})
     tools = _mcp(hosted, "tools/list", id_=2)["result"]["tools"]
     assert sorted(t["name"] for t in tools) == ["web_crawl", "web_map", "web_read", "web_search"]
+    # Directories (Claude, OpenAI, Glama, M8ven) want a title and all four hints on every tool.
+    for t in tools:
+        assert t["title"] and t["annotations"] == {
+            "title": t["title"], "readOnlyHint": True, "destructiveHint": False,
+            "idempotentHint": True, "openWorldHint": True}, t
     out = _mcp(hosted, "tools/call", {"name": "web_search", "arguments": {"query": "vector databases",
                                                                            "max_results": 2}}, id_=3)
     payload = json.loads(out["result"]["content"][0]["text"])
