@@ -1,0 +1,100 @@
+name: Release DeepSift
+run-name: "DeepSift ${{ github.sha }} | VPS=${{ inputs.deploy_vps }} Apify=${{ inputs.deploy_apify }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploy_vps:
+        description: "Deploy tested source to existing 21stReach VPS (production)"
+        type: boolean
+        required: true
+        default: false
+      deploy_apify:
+        description: "Publish tested source to aadstra/deepsift-search on Apify"
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deepsift-production-release
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install -r requirements.txt
+          python -m pip install -r requirements-actor.txt
+      - name: Run tests
+        run: python -m pytest -q tests
+      - name: Report release source
+        run: echo "Validated commit ${GITHUB_SHA}"
+
+  deploy_vps:
+    needs: test
+    if: ${{ inputs.deploy_vps }}
+    runs-on: ubuntu-latest
+    environment: deepsift-production
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure deploy SSH
+        env:
+          KEY: ${{ secrets.DEEPSIFT_VPS_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEEPSIFT_VPS_KNOWN_HOSTS }}
+        run: |
+          test -n "$KEY" && test -n "$KNOWN_HOSTS" || { echo "Missing VPS deploy SSH secrets"; exit 1; }
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
+      - name: Upload source only (preserve server configuration)
+        env:
+          HOST: ${{ secrets.DEEPSIFT_VPS_HOST }}
+          USER: ${{ secrets.DEEPSIFT_VPS_USER }}
+        run: |
+          test -n "$HOST" && test -n "$USER" || { echo "Missing VPS host or user"; exit 1; }
+          rsync -az --relative --exclude='__pycache__/' --exclude='*.pyc' \
+            deepsift/ deploy/ requirements.txt \
+            "$USER@$HOST:/docker/21streach-deepsift/src/"
+      - name: Rebuild and restart only DeepSift
+        env:
+          HOST: ${{ secrets.DEEPSIFT_VPS_HOST }}
+          USER: ${{ secrets.DEEPSIFT_VPS_USER }}
+        run: |
+          ssh "$USER@$HOST" 'set -eu; cd /docker/21streach-deepsift; docker compose build deepsift; docker compose up -d --no-deps deepsift; for n in $(seq 1 24); do state=$(docker inspect -f "{{.State.Health.Status}}" 21streach-deepsift); if [ "$state" = healthy ]; then exit 0; fi; if [ "$state" = unhealthy ]; then echo "DeepSift unhealthy"; exit 1; fi; sleep 5; done; echo "DeepSift health check timed out"; exit 1'
+      - name: Report release
+        run: echo "VPS deployment attempted from commit ${GITHUB_SHA}. Confirm app search endpoint and docker health."
+
+  deploy_apify:
+    needs: test
+    if: ${{ inputs.deploy_apify }}
+    runs-on: ubuntu-latest
+    environment: deepsift-production
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install Apify CLI
+        run: npm install --global apify-cli@1.11.0
+      - name: Publish actor and wait for build
+        env:
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+        run: |
+          test -n "$APIFY_TOKEN" || { echo "Missing APIFY_TOKEN"; exit 1; }
+          apify push aadstra/deepsift-search --force --wait-for-finish 1800
+      - name: Report release
+        run: echo "Apify release source commit ${GITHUB_SHA}. Confirm live Actor build/tag before announcing."
