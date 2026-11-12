@@ -1,0 +1,27 @@
+name: Diagnose VPS network
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Check network reachability (no credentials)
+        shell: bash
+        run: |
+          set -u
+          python3 - <<'PY'
+          import socket
+          for port in (22,443,80):
+              s=socket.socket()
+              s.settimeout(7)
+              try:
+                  s.connect(("179.236.252.245",port))
+                  print(f"TCP {port}: CONNECTED")
+              except OSError as e:
+                  print(f"TCP {port}: {type(e).__name__}: {e}")
+              finally:
+                  s.close()
+          PY
